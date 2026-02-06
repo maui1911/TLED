@@ -3,7 +3,7 @@
 ## Project Overview
 ESP32-C6 based LED controller using Matter protocol over Thread network. Like WLED, but for Thread.
 
-## Current Status: Phase 4b In Progress
+## Current Status: Phase 4b Complete
 
 ### What's Working
 - **On/Off control** via Home Assistant
@@ -14,6 +14,8 @@ ESP32-C6 based LED controller using Matter protocol over Thread network. Like WL
 - **Factory reset** - hold button on GPIO9 for 5+ seconds
 - **Smooth transitions** - 300ms fades on all color/brightness/power changes
 - **Built-in effects** - rainbow, breathing, candle, chase (API only for now)
+- **Serial configuration** - configure LED count, GPIO, type via USB serial
+- **Web installer** - flash firmware from browser (GitHub Pages)
 
 ### Hardware Configuration
 - **Board:** DFRobot Beetle ESP32-C6 (or any ESP32-C6)
@@ -129,7 +131,7 @@ app_driver_light_set_effect(handle, effect_id);
 | 2 | ✅ Done | RGB color, brightness, NVS persistence |
 | 3 | ✅ Done | Smooth transitions & effects |
 | 4 | ✅ Done | Kconfig + NVS config system |
-| 4b | 🔄 WIP | Web installer (ESP Web Tools) |
+| 4b | ✅ Done | Web installer + serial config |
 | 5 | ⏳ | OTA updates, watchdog, safety features |
 
 ## Phase 3 Details - Transitions & Effects
@@ -194,12 +196,13 @@ idf.py build
 | `CONFIG_TLED_RGB_ORDER_*` | GRB | Color order |
 | `CONFIG_TLED_DEFAULT_TRANSITION_MS` | 300 | Fade time |
 
-## Next Steps (Phase 4b/5)
+## Next Steps (Phase 5)
 1. ✅ Web installer page with ESP Web Tools
-2. ✅ GitHub Actions to build firmware on release
-3. ⏳ Set up GitHub repo and enable Pages
-4. ⏳ Create first release tag to trigger build
+2. ✅ GitHub Actions workflow for Pages deployment
+3. ✅ Serial configuration interface
+4. ⏳ Enable GitHub Pages (Settings → Pages → GitHub Actions)
 5. ⏳ OTA updates via Matter (Phase 5)
+6. ⏳ Watchdog and safety features (Phase 5)
 
 ## Known Issues / Notes
 - First commission after erase-flash may take a moment
