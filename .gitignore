@@ -24,3 +24,6 @@ Thumbs.db
 # Web installer firmware (built binaries)
 web-installer/firmware/
 web-installer/firmware-*/
+
+# Secrets
+.env
