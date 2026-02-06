@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TLED - Matter-over-Thread LED Controller</title>
+    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            max-width: 600px;
+            width: 100%;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #818cf8, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .tagline {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card h2 {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .config-grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .config-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .config-item label {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .config-item select,
+        .config-item input {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem;
+            color: var(--text);
+            font-size: 1rem;
+        }
+
+        .config-item select:focus,
+        .config-item input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .install-section {
+            text-align: center;
+            padding: 2rem;
+        }
+
+        esp-web-install-button {
+            --esp-tools-button-color: var(--primary);
+            --esp-tools-button-text-color: white;
+        }
+
+        esp-web-install-button::part(button) {
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 1rem 2rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        esp-web-install-button::part(button):hover {
+            background: var(--primary-dark);
+        }
+
+        .requirements {
+            margin-top: 1rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .requirements a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        .steps {
+            counter-reset: step;
+        }
+
+        .step {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .step::before {
+            counter-increment: step;
+            content: counter(step);
+            background: var(--primary);
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.9rem;
+            flex-shrink: 0;
+        }
+
+        .step-content h3 {
+            font-size: 1rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .step-content p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        footer {
+            margin-top: auto;
+            padding-top: 2rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        footer a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        .warning {
+            background: #422006;
+            border: 1px solid #854d0e;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+
+        .warning strong {
+            color: #fbbf24;
+        }
+
+        @media (max-width: 480px) {
+            h1 {
+                font-size: 2rem;
+            }
+
+            .card {
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>TLED</h1>
+            <p class="tagline">Matter-over-Thread LED Controller</p>
+        </header>
+
+        <div class="card">
+            <h2>What is TLED?</h2>
+            <p>TLED turns your ESP32-C6 into a smart LED strip controller that works with Apple Home, Google Home, and other Matter-compatible platforms over Thread mesh networking.</p>
+        </div>
+
+        <div class="card">
+            <h2>How It Works</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-content">
+                        <h3>Install Firmware</h3>
+                        <p>Connect your ESP32-C6 via USB and click Install below</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-content">
+                        <h3>Commission Device</h3>
+                        <p>Scan the QR code with your smart home app</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-content">
+                        <h3>Control Your LEDs</h3>
+                        <p>Adjust color, brightness, and effects from any Matter app</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Configuration</h2>
+            <p class="warning"><strong>Note:</strong> Configuration is set at compile time. This installer provides pre-built firmware with common configurations. For custom setups, build from source using <code>idf.py menuconfig</code>.</p>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label for="variant">Firmware Variant</label>
+                    <select id="variant">
+                        <option value="default">Default (10 LEDs, GPIO5, WS2812B)</option>
+                        <option value="60led">60 LEDs (GPIO5, WS2812B)</option>
+                        <option value="144led">144 LEDs (GPIO5, WS2812B)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="card install-section">
+            <esp-web-install-button id="installButton" manifest="manifest.json">
+                <button slot="activate">Install TLED</button>
+                <span slot="unsupported">
+                    Your browser doesn't support Web Serial.<br>
+                    Use Chrome or Edge on desktop.
+                </span>
+                <span slot="not-allowed">
+                    Serial access not allowed.<br>
+                    Make sure you're using HTTPS.
+                </span>
+            </esp-web-install-button>
+            <p class="requirements">
+                Requires <a href="https://caniuse.com/web-serial" target="_blank">Web Serial</a> (Chrome/Edge on desktop)
+            </p>
+        </div>
+
+        <div class="card">
+            <h2>After Installation</h2>
+            <p>Open a serial monitor to see the QR code URL for commissioning:</p>
+            <ol style="margin-top: 0.5rem; margin-left: 1.5rem; color: var(--text-muted);">
+                <li>Keep the device connected via USB</li>
+                <li>Open the browser's serial console or use a terminal app</li>
+                <li>Look for the QR code URL in the output</li>
+                <li>Scan the QR code with your smart home app</li>
+            </ol>
+        </div>
+    </div>
+
+    <footer>
+        <p>TLED is open source &bull; <a href="https://github.com/your-username/tled" target="_blank">View on GitHub</a></p>
+        <p style="margin-top: 0.5rem;">Like WLED, but for Thread</p>
+    </footer>
+
+    <script>
+        // Update manifest based on selected variant
+        const variantSelect = document.getElementById('variant');
+        const installButton = document.getElementById('installButton');
+
+        variantSelect.addEventListener('change', () => {
+            const variant = variantSelect.value;
+            if (variant === 'default') {
+                installButton.setAttribute('manifest', 'manifest.json');
+            } else {
+                installButton.setAttribute('manifest', `manifest-${variant}.json`);
+            }
+        });
+    </script>
+</body>
+</html>

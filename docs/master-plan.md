@@ -312,49 +312,120 @@ If this example builds, flashes, and shows a Matter commissioning QR code in the
 
 ---
 
-## Phase 4: Runtime Configuration
+## Phase 4: Easy Configuration & Web Installer
 
-**Goal:** Make TLED firmware reusable — flash once, configure per installation without reflashing.
+**Goal:** Make TLED dead simple to set up — no command line, no ESP-IDF installation needed.
 
-### Tasks
+### Two-Tier Configuration Approach
 
-1. **Create `app_nvs_config.cpp`**
-   - Store and retrieve configuration from NVS:
-     ```cpp
-     struct TledConfig {
-         uint16_t num_leds;       // 1-1000
-         uint8_t  gpio_pin;       // GPIO number for data
-         uint8_t  rgb_order;      // 0=GRB, 1=RGB, 2=BRG, 3=RBG, 4=BGR, 5=GBR
-         uint8_t  chipset;        // 0=WS2812B, 1=WS2811, 2=SK6812
-         uint8_t  max_brightness; // 0-255, safety limit for power supply
-     };
-     ```
-   - Provide sensible defaults matching current setup (250 LEDs, GPIO4, GRB, WS2812B)
-   - Apply config on boot, reinitialize RMT driver with new settings
+**Tier 1: Web Installer (for end users)**
+- Visit `tled.github.io` in Chrome/Edge
+- Select your settings from dropdowns
+- Click "Install" → firmware flashes directly over USB
+- Done!
 
-2. **BLE configuration interface**
-   - On first boot (or when BOOT button held during startup): enter BLE config mode
-   - Advertise a BLE GATT service with characteristics for each config parameter
-   - Build a simple companion web app (Web Bluetooth API) to configure TLED from a browser
-   - After config saved → reboot into normal Matter mode
+**Tier 2: Kconfig/menuconfig (for developers)**
+- Run `idf.py menuconfig`
+- Navigate to "TLED Configuration"
+- Set LED count, GPIO, brightness, etc.
+- Build and flash
 
-3. **Alternative: Matter custom attributes**
-   - Expose config as custom Matter attributes on a vendor-specific cluster
-   - Allows changing config from Home Assistant via developer tools
-   - Less user-friendly but no separate app needed
+### Configurable Parameters
 
-4. **Config validation**
-   - Validate GPIO pin is actually available on Beetle ESP32-C6
-   - Validate LED count is reasonable for available memory
-   - Validate chipset timing parameters
-   - Fall back to defaults on invalid config
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| LED Count | 10 | 1-1000 | Number of LEDs in strip |
+| GPIO Pin | 5 | 0-21 | Data pin (avoid 9, 12-13, 15) |
+| Max Brightness | 255 | 1-255 | Safety limit for power supply |
+| LED Type | WS2812B | WS2812B/WS2811/SK6812 | Chipset timing |
+| RGB Order | GRB | GRB/RGB/BRG/etc | Color byte order |
+| Transition Time | 300ms | 0-5000ms | Fade duration |
+
+### Web Installer Implementation
+
+Uses **ESP Web Tools** (https://esphome.github.io/esp-web-tools/) — same tech as WLED, ESPHome.
+
+**How it works:**
+1. User visits webpage hosted on GitHub Pages
+2. Webpage shows configuration form
+3. User selects: LED count, GPIO, brightness, LED type
+4. Clicks "Install TLED"
+5. Browser prompts for USB device selection
+6. Firmware flashes directly — no drivers, no software install
+7. Device reboots, ready to commission in Home Assistant
+
+**Technical approach:**
+- Pre-build firmware binaries for common configurations, OR
+- Build a single firmware with "factory defaults" that user can later change via NVS, OR
+- Use a manifest.json that points to the right binary based on user selection
+
+**Webpage structure:**
+```
+tled.github.io/
+├── index.html          # Main installer page
+├── manifest.json       # ESP Web Tools manifest
+├── firmware/
+│   └── tled.bin        # Latest firmware binary
+└── static/
+    ├── style.css
+    └── logo.png
+```
+
+**Sample HTML:**
+```html
+<esp-web-install-button manifest="manifest.json">
+  <button slot="activate">Install TLED</button>
+</esp-web-install-button>
+
+<script type="module" src="https://unpkg.com/esp-web-tools/dist/web/install-button.js"></script>
+```
+
+### Kconfig Menu (Already Implemented)
+
+Located in `main/Kconfig.projbuild`:
+
+```
+TLED Configuration
+├── Number of LEDs in strip (1-1000)
+├── LED data GPIO pin (0-21)
+├── Maximum brightness (0-255)
+├── LED strip type (WS2812B / WS2811 / SK6812)
+├── RGB byte order (GRB / RGB / BRG / ...)
+└── Default transition time (0-5000ms)
+```
+
+Developers run `idf.py menuconfig` → set values → build → flash.
+
+### Implementation Tasks
+
+1. **Kconfig integration** ✅ DONE
+   - Created `main/Kconfig.projbuild` with all config options
+   - Config values used at compile time via `CONFIG_TLED_*` macros
+
+2. **NVS config persistence** ✅ DONE
+   - `app_nvs_config.cpp` saves/loads config to NVS
+   - First boot uses Kconfig defaults, saves to NVS
+   - Subsequent boots load from NVS
+
+3. **Web Installer page**
+   - Create GitHub repo or GitHub Pages site
+   - Build ESP Web Tools installer page
+   - Add configuration dropdowns
+   - Host pre-built firmware binaries
+   - Test on Chrome, Edge, Android
+
+4. **CI/CD for firmware builds**
+   - GitHub Actions workflow to build firmware on release
+   - Upload binary artifacts to releases
+   - Update manifest.json automatically
 
 ### Success Criteria
-- [ ] Flash one firmware on any Beetle ESP32-C6
-- [ ] Configure LED count, GPIO, RGB order, chipset without reflashing
-- [ ] Configuration persists across reboots
-- [ ] Invalid config falls back to safe defaults
-- [ ] BLE config mode accessible via BOOT button
+- [x] Kconfig menu works via `idf.py menuconfig`
+- [x] Config persists in NVS across reboots
+- [x] Driver uses config values for GPIO, LED count, etc.
+- [ ] Web installer page hosted and working
+- [ ] End user can flash without any command-line tools
+- [ ] Works on Chrome, Edge, Android Chrome
 
 ---
 

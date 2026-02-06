@@ -13,12 +13,7 @@
 
 // Hardware Configuration - DFRobot Beetle ESP32-C6
 #define TLED_ONBOARD_LED_GPIO   15      // Onboard LED (fallback)
-#define TLED_LED_STRIP_GPIO     5       // LED strip data pin
 #define TLED_BOOT_BUTTON_GPIO   9       // Boot button
-
-// LED strip settings
-#define TLED_NUM_LEDS           10      // Number of LEDs in strip
-#define TLED_LED_STRIP_TYPE     0       // 0=WS2812B
 
 // Color remapping constants (Matter uses 0-254 range)
 #define MATTER_BRIGHTNESS_MAX   254
@@ -36,7 +31,7 @@
 #define TLED_TRANSITION_TASK_STACK  4096
 #define TLED_TRANSITION_TASK_PRIO   5
 #define TLED_TRANSITION_TICK_MS     20      // 50 FPS update rate
-#define TLED_DEFAULT_TRANSITION_MS  300     // Default fade time when not specified
+#define TLED_DEFAULT_TRANSITION_MS  CONFIG_TLED_DEFAULT_TRANSITION_MS
 
 // Effect IDs
 #define TLED_EFFECT_NONE        0

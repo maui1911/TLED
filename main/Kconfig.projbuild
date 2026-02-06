@@ -1,0 +1,71 @@
+menu "TLED Configuration"
+
+    config TLED_NUM_LEDS
+        int "Number of LEDs in strip"
+        default 10
+        range 1 1000
+        help
+            Number of LEDs in your WS2812B/SK6812 strip.
+
+    config TLED_GPIO_PIN
+        int "LED data GPIO pin"
+        default 5
+        range 0 21
+        help
+            GPIO pin connected to the LED strip data line.
+            Default is GPIO5 for DFRobot Beetle ESP32-C6.
+            Avoid: GPIO9 (boot button), GPIO12-13 (USB), GPIO15 (onboard LED).
+
+    config TLED_MAX_BRIGHTNESS
+        int "Maximum brightness (0-255)"
+        default 255
+        range 1 255
+        help
+            Safety limit for maximum brightness.
+            Lower this if your power supply can't handle full brightness.
+            Formula: ~60mA per LED at full white, full brightness.
+
+    choice TLED_LED_TYPE
+        prompt "LED strip type"
+        default TLED_LED_WS2812B
+        help
+            Select your LED strip chipset.
+
+        config TLED_LED_WS2812B
+            bool "WS2812B (most common)"
+        config TLED_LED_WS2811
+            bool "WS2811"
+        config TLED_LED_SK6812
+            bool "SK6812 (RGBW)"
+    endchoice
+
+    choice TLED_RGB_ORDER
+        prompt "RGB byte order"
+        default TLED_RGB_ORDER_GRB
+        help
+            Color byte order. Most WS2812B strips use GRB.
+            If colors look wrong (red/green swapped), try a different order.
+
+        config TLED_RGB_ORDER_GRB
+            bool "GRB (most WS2812B)"
+        config TLED_RGB_ORDER_RGB
+            bool "RGB"
+        config TLED_RGB_ORDER_BRG
+            bool "BRG"
+        config TLED_RGB_ORDER_RBG
+            bool "RBG"
+        config TLED_RGB_ORDER_BGR
+            bool "BGR"
+        config TLED_RGB_ORDER_GBR
+            bool "GBR"
+    endchoice
+
+    config TLED_DEFAULT_TRANSITION_MS
+        int "Default transition time (ms)"
+        default 300
+        range 0 5000
+        help
+            Default fade duration for color/brightness changes.
+            Set to 0 for instant changes.
+
+endmenu

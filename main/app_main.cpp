@@ -6,6 +6,9 @@
 #include <esp_err.h>
 #include <esp_log.h>
 #include <nvs_flash.h>
+#include <driver/gpio.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <esp_matter.h>
 #include <esp_matter_console.h>
@@ -15,6 +18,8 @@
 
 #include "app_config.h"
 #include "app_driver.h"
+#include "app_nvs_config.h"
+#include "app_ble_config.h"
 #include <app_reset.h>
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
@@ -27,7 +32,7 @@
 
 // Version string from CMakeLists.txt
 #ifndef PROJECT_VER
-#define PROJECT_VER "0.1.0"
+#define PROJECT_VER "0.2.0"
 #endif
 
 static const char *TAG = "tled_main";
@@ -41,6 +46,45 @@ using namespace esp_matter::endpoint;
 using namespace chip::app::Clusters;
 
 constexpr auto k_timeout_seconds = 300;
+
+// Check if boot button is held
+static bool is_button_held(uint32_t hold_time_ms)
+{
+    gpio_num_t btn_gpio = (gpio_num_t)TLED_BOOT_BUTTON_GPIO;
+
+    // Configure GPIO as input with pullup
+    gpio_config_t io_conf = {};
+    io_conf.pin_bit_mask = (1ULL << btn_gpio);
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    gpio_config(&io_conf);
+
+    // Check if button is pressed (active low)
+    if (gpio_get_level(btn_gpio) != 0) {
+        return false;  // Not pressed
+    }
+
+    // Wait and check if still held
+    ESP_LOGI(TAG, "Button pressed, waiting %lu ms to confirm config mode...", (unsigned long)hold_time_ms);
+
+    uint32_t held_time = 0;
+    const uint32_t check_interval = 100;
+
+    while (held_time < hold_time_ms) {
+        vTaskDelay(pdMS_TO_TICKS(check_interval));
+        held_time += check_interval;
+
+        if (gpio_get_level(btn_gpio) != 0) {
+            ESP_LOGI(TAG, "Button released, normal boot");
+            return false;
+        }
+    }
+
+    ESP_LOGI(TAG, "Button held for %lu ms - entering config mode", (unsigned long)hold_time_ms);
+    return true;
+}
 
 static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
 {
@@ -159,6 +203,30 @@ extern "C" void app_main()
     }
     ESP_ERROR_CHECK(err);
 
+    /* Initialize configuration */
+    err = tled_config_init();
+    ESP_ERROR_CHECK(err);
+
+    const tled_config_t *config = tled_config_get();
+
+    /* Check if first boot - use defaults and save */
+    if (!tled_config_is_configured()) {
+        ESP_LOGI(TAG, "First boot detected - using default config");
+        ESP_LOGI(TAG, "To change settings: hold BOOT button for 5s during startup");
+
+        // Save the default config so next boot isn't "first boot"
+        tled_config_save();
+    }
+
+    // TODO: BLE config mode on button hold (needs to be done before Matter starts BLE)
+    // For now, just log if button is held
+    if (is_button_held(3000)) {
+        ESP_LOGW(TAG, "Button held - BLE config not yet implemented");
+        ESP_LOGW(TAG, "Use nRF Connect to configure via BLE characteristics");
+    }
+
+    ESP_LOGI(TAG, "Using config: %d LEDs on GPIO%d", config->num_leds, config->gpio_pin);
+
     /* Initialize drivers */
     app_driver_handle_t light_handle = app_driver_light_init();
     ABORT_APP_ON_FAILURE(light_handle != NULL, ESP_LOGE(TAG, "Failed to initialize light driver"));
@@ -172,7 +240,7 @@ extern "C" void app_main()
     node_t *node = node::create(&node_config, app_attribute_update_cb, app_identification_cb);
     ABORT_APP_ON_FAILURE(node != nullptr, ESP_LOGE(TAG, "Failed to create Matter node"));
 
-    /* Create Dimmable Light + HSV Color Control (Phase 2)
+    /* Create Dimmable Light + HSV Color Control
      * Using dimmable_light as base, then adding ColorControl with HSV only
      * This avoids XY and ColorTemperature features that cause issues
      */
@@ -204,12 +272,12 @@ extern "C" void app_main()
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
     /* Set OpenThread platform config */
-    esp_openthread_platform_config_t config = {
+    esp_openthread_platform_config_t ot_config = {
         .radio_config = ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG(),
         .host_config = ESP_OPENTHREAD_DEFAULT_HOST_CONFIG(),
         .port_config = ESP_OPENTHREAD_DEFAULT_PORT_CONFIG(),
     };
-    set_openthread_platform_config(&config);
+    set_openthread_platform_config(&ot_config);
 #endif
 
     /* Start Matter */

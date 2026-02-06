@@ -20,3 +20,7 @@ dependencies.lock
 # OS files
 .DS_Store
 Thumbs.db
+
+# Web installer firmware (built binaries)
+web-installer/firmware/
+web-installer/firmware-*/

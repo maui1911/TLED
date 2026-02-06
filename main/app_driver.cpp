@@ -17,6 +17,7 @@
 #include <esp_matter.h>
 #include "app_driver.h"
 #include "app_config.h"
+#include "app_nvs_config.h"
 
 #include <iot_button.h>
 #include <button_gpio.h>
@@ -82,6 +83,11 @@ typedef struct {
     uint32_t effect_step;
     TaskHandle_t task_handle;
     SemaphoreHandle_t mutex;
+
+    // Phase 4: Runtime config
+    uint16_t num_leds;
+    uint8_t gpio_pin;
+    uint8_t max_brightness;
 } light_driver_t;
 
 // Static driver instance
@@ -98,7 +104,10 @@ static light_driver_t s_light_driver = {
     .effect_id = TLED_EFFECT_NONE,
     .effect_step = 0,
     .task_handle = NULL,
-    .mutex = NULL
+    .mutex = NULL,
+    .num_leds = TLED_DEFAULT_NUM_LEDS,
+    .gpio_pin = TLED_DEFAULT_GPIO_PIN,
+    .max_brightness = TLED_DEFAULT_MAX_BRIGHTNESS
 };
 
 // Forward declarations
@@ -203,7 +212,7 @@ static esp_err_t update_strip_rgb(light_driver_t *driver, uint8_t r, uint8_t g, 
         return ESP_ERR_INVALID_STATE;
     }
 
-    for (int i = 0; i < TLED_NUM_LEDS; i++) {
+    for (int i = 0; i < driver->num_leds; i++) {
         driver->strip->set_pixel(driver->strip, i, r, g, b);
     }
 
@@ -217,7 +226,7 @@ static esp_err_t update_strip_array(light_driver_t *driver, uint8_t (*colors)[3]
         return ESP_ERR_INVALID_STATE;
     }
 
-    for (int i = 0; i < TLED_NUM_LEDS; i++) {
+    for (int i = 0; i < driver->num_leds; i++) {
         driver->strip->set_pixel(driver->strip, i, colors[i][0], colors[i][1], colors[i][2]);
     }
 
@@ -323,8 +332,6 @@ static void effect_candle(light_driver_t *driver)
 // Chase effect - moving dot
 static void effect_chase(light_driver_t *driver)
 {
-    uint8_t colors[TLED_NUM_LEDS][3] = {0};
-
     // Get current color
     uint16_t hue = (driver->hue * STANDARD_HUE_MAX) / MATTER_HUE_MAX;
     uint8_t sat = (driver->saturation * STANDARD_SATURATION_MAX) / MATTER_SATURATION_MAX;
@@ -334,21 +341,22 @@ static void effect_chase(light_driver_t *driver)
     hsv_to_rgb(hue, sat, val, &r, &g, &b);
 
     // Current position
-    int pos = driver->effect_step % TLED_NUM_LEDS;
+    int num_leds = driver->num_leds;
+    int pos = driver->effect_step % num_leds;
+    int trail = (pos - 1 + num_leds) % num_leds;
 
-    // Set the chase LED with full brightness
-    colors[pos][0] = r;
-    colors[pos][1] = g;
-    colors[pos][2] = b;
+    // Set all LEDs
+    for (int i = 0; i < num_leds; i++) {
+        if (i == pos) {
+            driver->strip->set_pixel(driver->strip, i, r, g, b);
+        } else if (i == trail) {
+            driver->strip->set_pixel(driver->strip, i, r / 3, g / 3, b / 3);
+        } else {
+            driver->strip->set_pixel(driver->strip, i, 0, 0, 0);
+        }
+    }
 
-    // Fade trail
-    int trail = (pos - 1 + TLED_NUM_LEDS) % TLED_NUM_LEDS;
-    colors[trail][0] = r / 3;
-    colors[trail][1] = g / 3;
-    colors[trail][2] = b / 3;
-
-    update_strip_array(driver, colors);
-
+    driver->strip->refresh(driver->strip, 100);
     driver->effect_step++;
 }
 
@@ -800,8 +808,14 @@ esp_err_t app_driver_light_set_defaults(uint16_t endpoint_id)
 
 app_driver_handle_t app_driver_light_init(void)
 {
-    ESP_LOGI(TAG, "Initializing LED strip driver on GPIO%d with %d LEDs",
-             TLED_LED_STRIP_GPIO, TLED_NUM_LEDS);
+    // Load config values
+    const tled_config_t *config = tled_config_get();
+    s_light_driver.num_leds = config->num_leds;
+    s_light_driver.gpio_pin = config->gpio_pin;
+    s_light_driver.max_brightness = config->max_brightness;
+
+    ESP_LOGI(TAG, "Initializing LED strip driver on GPIO%d with %d LEDs (max brightness %d)",
+             s_light_driver.gpio_pin, s_light_driver.num_leds, s_light_driver.max_brightness);
 
     // Create mutex for thread-safe access
     s_light_driver.mutex = xSemaphoreCreateMutex();
@@ -811,7 +825,7 @@ app_driver_handle_t app_driver_light_init(void)
     }
 
     // Configure RMT for WS2812B
-    rmt_config_t rmt_cfg = RMT_DEFAULT_CONFIG_TX((gpio_num_t)TLED_LED_STRIP_GPIO, RMT_CHANNEL_0);
+    rmt_config_t rmt_cfg = RMT_DEFAULT_CONFIG_TX((gpio_num_t)s_light_driver.gpio_pin, RMT_CHANNEL_0);
     rmt_cfg.clk_div = 2;
 
     esp_err_t err = rmt_config(&rmt_cfg);
@@ -827,7 +841,7 @@ app_driver_handle_t app_driver_light_init(void)
     }
 
     // Configure LED strip
-    led_strip_config_t strip_config = LED_STRIP_DEFAULT_CONFIG(TLED_NUM_LEDS, (led_strip_dev_t)rmt_cfg.channel);
+    led_strip_config_t strip_config = LED_STRIP_DEFAULT_CONFIG(s_light_driver.num_leds, (led_strip_dev_t)rmt_cfg.channel);
     s_light_driver.strip = led_strip_new_rmt_ws2812(&strip_config);
     if (s_light_driver.strip == NULL) {
         ESP_LOGE(TAG, "Failed to create LED strip");

@@ -3,7 +3,7 @@
 ## Project Overview
 ESP32-C6 based LED controller using Matter protocol over Thread network. Like WLED, but for Thread.
 
-## Current Status: Phase 3 Complete
+## Current Status: Phase 4b In Progress
 
 ### What's Working
 - **On/Off control** via Home Assistant
@@ -63,14 +63,24 @@ https://project-chip.github.io/connectedhomeip/qrcode.html?data=MT%3AY.K9042C00K
 ```
 ~/dev/noscope.TLED/
 ├── main/
-│   ├── app_main.cpp      # Matter setup, endpoint creation
-│   ├── app_driver.cpp    # LED strip driver, NVS persistence
-│   ├── app_driver.h      # Driver interface
-│   └── app_config.h      # Pin definitions, LED count
+│   ├── app_main.cpp        # Matter setup, endpoint creation
+│   ├── app_driver.cpp      # LED strip driver, NVS persistence
+│   ├── app_driver.h        # Driver interface
+│   ├── app_config.h        # Pin definitions, LED count
+│   ├── app_nvs_config.h    # Runtime config types/API
+│   ├── app_nvs_config.cpp  # Config persistence to NVS
+│   └── Kconfig.projbuild   # menuconfig options
+├── web-installer/
+│   ├── index.html          # ESP Web Tools installer page
+│   ├── manifest.json       # Firmware manifest for flashing
+│   ├── copy-firmware.sh    # Copy built firmware for testing
+│   └── serve-local.sh      # Local dev server
+├── .github/workflows/
+│   └── build-and-deploy.yml  # CI/CD for firmware + Pages
 ├── docs/
-│   └── master-plan.md    # Full project plan (5 phases)
-├── sdkconfig.defaults    # ESP-IDF config (Thread FTD, Matter, etc)
-└── partitions.csv        # Flash partition layout
+│   └── master-plan.md      # Full project plan (5 phases)
+├── sdkconfig.defaults      # ESP-IDF config (Thread FTD, Matter, etc)
+└── partitions.csv          # Flash partition layout
 ```
 
 ## Key Implementation Details
@@ -118,7 +128,8 @@ app_driver_light_set_effect(handle, effect_id);
 | 1 | ✅ Done | Basic on/off light over Matter+Thread |
 | 2 | ✅ Done | RGB color, brightness, NVS persistence |
 | 3 | ✅ Done | Smooth transitions & effects |
-| 4 | ⏳ Next | Runtime config (BLE setup for LED count, GPIO) |
+| 4 | ✅ Done | Kconfig + NVS config system |
+| 4b | 🔄 WIP | Web installer (ESP Web Tools) |
 | 5 | ⏳ | OTA updates, watchdog, safety features |
 
 ## Phase 3 Details - Transitions & Effects
@@ -138,10 +149,57 @@ app_driver_light_set_effect(handle, TLED_EFFECT_CHASE);     // 4 - moving dot
 app_driver_light_set_effect(handle, TLED_EFFECT_NONE);      // 0 - stop effect
 ```
 
-## Next Steps (Phase 4)
-1. BLE provisioning for runtime configuration
-2. Configurable LED count and GPIO pin
-3. Configurable default brightness/color
+## Configuration System (Phase 4)
+
+### For Developers: menuconfig
+```bash
+idf.py menuconfig
+# Navigate to "TLED Configuration" menu
+# Set: LED count, GPIO pin, max brightness, LED type, RGB order, transition time
+```
+
+### For End Users: Web Installer
+The web installer uses ESP Web Tools to flash firmware directly from a browser.
+
+**Files created:**
+- `web-installer/index.html` - Installer page with variant selection
+- `web-installer/manifest.json` - ESP Web Tools firmware manifest
+- `.github/workflows/build-and-deploy.yml` - CI/CD for releases
+
+**How it works:**
+1. Push a version tag (e.g., `git tag v0.4.0 && git push --tags`)
+2. GitHub Actions builds firmware variants (10/60/144 LEDs)
+3. Deploys to GitHub Pages automatically
+4. Users visit the page, select variant, click "Install"
+
+**Local testing:**
+```bash
+# Build the firmware first
+idf.py build
+
+# Copy firmware files
+./web-installer/copy-firmware.sh
+
+# Serve locally (UI only - Web Serial needs HTTPS)
+./web-installer/serve-local.sh
+```
+
+### Kconfig Options
+| Option | Default | Description |
+|--------|---------|-------------|
+| `CONFIG_TLED_NUM_LEDS` | 10 | Number of LEDs |
+| `CONFIG_TLED_GPIO_PIN` | 5 | Data GPIO pin |
+| `CONFIG_TLED_MAX_BRIGHTNESS` | 255 | Max brightness |
+| `CONFIG_TLED_LED_*` | WS2812B | LED chipset |
+| `CONFIG_TLED_RGB_ORDER_*` | GRB | Color order |
+| `CONFIG_TLED_DEFAULT_TRANSITION_MS` | 300 | Fade time |
+
+## Next Steps (Phase 4b/5)
+1. ✅ Web installer page with ESP Web Tools
+2. ✅ GitHub Actions to build firmware on release
+3. ⏳ Set up GitHub repo and enable Pages
+4. ⏳ Create first release tag to trigger build
+5. ⏳ OTA updates via Matter (Phase 5)
 
 ## Known Issues / Notes
 - First commission after erase-flash may take a moment
