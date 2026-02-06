@@ -840,8 +840,10 @@ app_driver_handle_t app_driver_light_init(void)
         return NULL;
     }
 
-    // Configure LED strip
-    led_strip_config_t strip_config = LED_STRIP_DEFAULT_CONFIG(s_light_driver.num_leds, (led_strip_dev_t)rmt_cfg.channel);
+    // Configure LED strip with extra buffer to clear any previous LEDs
+    // Use max of configured LEDs or 100 to ensure we clear leftover data from previous config
+    uint16_t strip_buffer_size = s_light_driver.num_leds > 100 ? s_light_driver.num_leds : 100;
+    led_strip_config_t strip_config = LED_STRIP_DEFAULT_CONFIG(strip_buffer_size, (led_strip_dev_t)rmt_cfg.channel);
     s_light_driver.strip = led_strip_new_rmt_ws2812(&strip_config);
     if (s_light_driver.strip == NULL) {
         ESP_LOGE(TAG, "Failed to create LED strip");
@@ -849,7 +851,7 @@ app_driver_handle_t app_driver_light_init(void)
         return NULL;
     }
 
-    // Clear strip (all off)
+    // Clear all LEDs in buffer (turns off any leftover LEDs from previous config)
     s_light_driver.strip->clear(s_light_driver.strip, 100);
 
     // Start the transition/effect task
