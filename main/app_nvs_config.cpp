@@ -124,6 +124,14 @@ const tled_config_t* tled_config_get(void)
     return &s_config;
 }
 
+tled_config_t* tled_config_get_mutable(void)
+{
+    if (!s_initialized) {
+        tled_config_init();
+    }
+    return &s_config;
+}
+
 bool tled_config_is_configured(void)
 {
     if (!s_initialized) {

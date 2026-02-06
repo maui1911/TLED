@@ -1,129 +1,19 @@
-name: Build and Deploy Web Installer
+name: Deploy Web Installer
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+    paths:
+      - 'web-installer/**'
+      - '.github/workflows/build-and-deploy.yml'
+  release:
+    types: [published]
   workflow_dispatch:
-    inputs:
-      deploy:
-        description: 'Deploy to GitHub Pages'
-        required: false
-        default: true
-        type: boolean
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup ESP-IDF
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.4.1
-          target: esp32c6
-
-      - name: Clone ESP-Matter
-        run: |
-          git clone --depth 1 https://github.com/espressif/esp-matter.git ~/esp-matter
-          cd ~/esp-matter
-          git submodule update --init --depth 1
-          ./install.sh
-
-      - name: Build default firmware (10 LEDs)
-        run: |
-          source ~/esp-matter/export.sh
-          idf.py build
-          mkdir -p web-installer/firmware
-          cp build/bootloader/bootloader.bin web-installer/firmware/
-          cp build/partition_table/partition-table.bin web-installer/firmware/
-          cp build/tled.bin web-installer/firmware/
-
-      - name: Build 60 LED variant
-        run: |
-          source ~/esp-matter/export.sh
-          # Override LED count via sdkconfig
-          echo "CONFIG_TLED_NUM_LEDS=60" >> sdkconfig.defaults
-          idf.py reconfigure
-          idf.py build
-          mkdir -p web-installer/firmware-60led
-          cp build/bootloader/bootloader.bin web-installer/firmware-60led/
-          cp build/partition_table/partition-table.bin web-installer/firmware-60led/
-          cp build/tled.bin web-installer/firmware-60led/
-          # Reset to default
-          git checkout sdkconfig.defaults
-
-      - name: Build 144 LED variant
-        run: |
-          source ~/esp-matter/export.sh
-          echo "CONFIG_TLED_NUM_LEDS=144" >> sdkconfig.defaults
-          idf.py reconfigure
-          idf.py build
-          mkdir -p web-installer/firmware-144led
-          cp build/bootloader/bootloader.bin web-installer/firmware-144led/
-          cp build/partition_table/partition-table.bin web-installer/firmware-144led/
-          cp build/tled.bin web-installer/firmware-144led/
-          git checkout sdkconfig.defaults
-
-      - name: Create variant manifests
-        run: |
-          # 60 LED manifest
-          cat > web-installer/manifest-60led.json << 'EOF'
-          {
-            "name": "TLED - 60 LEDs",
-            "version": "${{ github.ref_name }}",
-            "home_assistant_domain": "matter",
-            "new_install_prompt_erase": true,
-            "builds": [
-              {
-                "chipFamily": "ESP32-C6",
-                "parts": [
-                  { "path": "firmware-60led/bootloader.bin", "offset": 0 },
-                  { "path": "firmware-60led/partition-table.bin", "offset": 32768 },
-                  { "path": "firmware-60led/tled.bin", "offset": 65536 }
-                ]
-              }
-            ]
-          }
-          EOF
-
-          # 144 LED manifest
-          cat > web-installer/manifest-144led.json << 'EOF'
-          {
-            "name": "TLED - 144 LEDs",
-            "version": "${{ github.ref_name }}",
-            "home_assistant_domain": "matter",
-            "new_install_prompt_erase": true,
-            "builds": [
-              {
-                "chipFamily": "ESP32-C6",
-                "parts": [
-                  { "path": "firmware-144led/bootloader.bin", "offset": 0 },
-                  { "path": "firmware-144led/partition-table.bin", "offset": 32768 },
-                  { "path": "firmware-144led/tled.bin", "offset": 65536 }
-                ]
-              }
-            ]
-          }
-          EOF
-
-      - name: Update version in default manifest
-        run: |
-          sed -i 's/"version": "0.4.0"/"version": "${{ github.ref_name }}"/' web-installer/manifest.json
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-installer
-          path: web-installer/
-
   deploy:
-    needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy)
 
     permissions:
       contents: read
@@ -135,11 +25,13 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: web-installer
-          path: web-installer
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Update version in manifest
+        if: github.event_name == 'release'
+        run: |
+          sed -i 's/"version": ".*"/"version": "${{ github.event.release.tag_name }}"/' web-installer/manifest.json
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

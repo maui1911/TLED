@@ -21,8 +21,7 @@ dependencies.lock
 .DS_Store
 Thumbs.db
 
-# Web installer firmware (built binaries)
-web-installer/firmware/
+# Web installer firmware variants (built locally for variants)
 web-installer/firmware-*/
 
 # Secrets

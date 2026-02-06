@@ -20,6 +20,7 @@
 #include "app_driver.h"
 #include "app_nvs_config.h"
 #include "app_ble_config.h"
+#include "app_serial_config.h"
 #include <app_reset.h>
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
@@ -298,7 +299,11 @@ extern "C" void app_main()
     esp_matter::console::init();
 #endif
 
+    /* Initialize serial configuration interface */
+    serial_config_init();
+
     ESP_LOGI(TAG, "TLED initialization complete. Waiting for commissioning...");
+    ESP_LOGI(TAG, "Serial config available - connect via USB and type 'help'");
 
     /* Main loop - just idle, all work done in callbacks */
     while (true) {

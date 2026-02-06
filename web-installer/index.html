@@ -9,6 +9,7 @@
         :root {
             --primary: #6366f1;
             --primary-dark: #4f46e5;
+            --success: #22c55e;
             --bg: #0f172a;
             --surface: #1e293b;
             --text: #f1f5f9;
@@ -16,32 +17,19 @@
             --border: #334155;
         }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
             padding: 2rem 1rem;
         }
 
-        .container {
-            max-width: 600px;
-            width: 100%;
-        }
+        .container { max-width: 600px; margin: 0 auto; }
 
-        header {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
+        header { text-align: center; margin-bottom: 2rem; }
 
         h1 {
             font-size: 2.5rem;
@@ -52,10 +40,32 @@
             background-clip: text;
         }
 
-        .tagline {
-            color: var(--text-muted);
-            font-size: 1.1rem;
+        .tagline { color: var(--text-muted); font-size: 1.1rem; }
+
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
         }
+
+        .tab {
+            flex: 1;
+            padding: 0.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-muted);
+            cursor: pointer;
+            text-align: center;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .tab:hover { border-color: var(--primary); }
+        .tab.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
 
         .card {
             background: var(--surface);
@@ -65,29 +75,19 @@
             margin-bottom: 1.5rem;
         }
 
-        .card h2 {
-            font-size: 1.2rem;
-            margin-bottom: 1rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
+        .card h2 { font-size: 1.2rem; margin-bottom: 1rem; }
 
-        .config-grid {
+        .config-grid { display: grid; gap: 1rem; }
+
+        .config-row {
             display: grid;
+            grid-template-columns: 1fr 1fr;
             gap: 1rem;
         }
 
-        .config-item {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
+        .config-item { display: flex; flex-direction: column; gap: 0.5rem; }
 
-        .config-item label {
-            font-size: 0.9rem;
-            color: var(--text-muted);
-        }
+        .config-item label { font-size: 0.9rem; color: var(--text-muted); }
 
         .config-item select,
         .config-item input {
@@ -97,6 +97,7 @@
             padding: 0.75rem;
             color: var(--text);
             font-size: 1rem;
+            width: 100%;
         }
 
         .config-item select:focus,
@@ -105,15 +106,25 @@
             border-color: var(--primary);
         }
 
-        .install-section {
-            text-align: center;
-            padding: 2rem;
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            width: 100%;
         }
 
-        esp-web-install-button {
-            --esp-tools-button-color: var(--primary);
-            --esp-tools-button-text-color: white;
-        }
+        .btn:hover { background: var(--primary-dark); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-success { background: var(--success); }
+        .btn-success:hover { background: #16a34a; }
+
+        .install-section { text-align: center; padding: 1rem 0; }
 
         esp-web-install-button::part(button) {
             background: var(--primary);
@@ -124,94 +135,60 @@
             font-size: 1.1rem;
             font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s;
         }
 
-        esp-web-install-button::part(button):hover {
-            background: var(--primary-dark);
-        }
+        esp-web-install-button::part(button):hover { background: var(--primary-dark); }
 
-        .requirements {
-            margin-top: 1rem;
+        .terminal {
+            background: #000;
+            border-radius: 8px;
+            padding: 1rem;
+            font-family: 'Monaco', 'Menlo', monospace;
             font-size: 0.85rem;
-            color: var(--text-muted);
+            height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
         }
 
-        .requirements a {
-            color: var(--primary);
-            text-decoration: none;
-        }
+        .terminal .prompt { color: #22c55e; }
+        .terminal .response { color: #94a3b8; }
+        .terminal .error { color: #ef4444; }
 
-        .steps {
-            counter-reset: step;
-        }
-
-        .step {
-            display: flex;
-            gap: 1rem;
-            margin-bottom: 1rem;
-        }
-
-        .step::before {
-            counter-increment: step;
-            content: counter(step);
-            background: var(--primary);
-            color: white;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
+        .status {
             display: flex;
             align-items: center;
-            justify-content: center;
-            font-weight: 600;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border-radius: 8px;
             font-size: 0.9rem;
-            flex-shrink: 0;
         }
 
-        .step-content h3 {
-            font-size: 1rem;
-            margin-bottom: 0.25rem;
-        }
+        .status.disconnected { background: #422006; color: #fbbf24; }
+        .status.connected { background: #14532d; color: #4ade80; }
 
-        .step-content p {
-            color: var(--text-muted);
-            font-size: 0.9rem;
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
         }
 
         footer {
-            margin-top: auto;
-            padding-top: 2rem;
             text-align: center;
             color: var(--text-muted);
             font-size: 0.85rem;
+            margin-top: 2rem;
         }
 
-        footer a {
-            color: var(--primary);
-            text-decoration: none;
-        }
+        footer a { color: var(--primary); text-decoration: none; }
 
-        .warning {
-            background: #422006;
-            border: 1px solid #854d0e;
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-            font-size: 0.9rem;
-        }
-
-        .warning strong {
-            color: #fbbf24;
-        }
+        .info { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem; }
 
         @media (max-width: 480px) {
-            h1 {
-                font-size: 2rem;
-            }
-
-            .card {
-                padding: 1rem;
-            }
+            h1 { font-size: 2rem; }
+            .config-row { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -222,97 +199,251 @@
             <p class="tagline">Matter-over-Thread LED Controller</p>
         </header>
 
-        <div class="card">
-            <h2>What is TLED?</h2>
-            <p>TLED turns your ESP32-C6 into a smart LED strip controller that works with Apple Home, Google Home, and other Matter-compatible platforms over Thread mesh networking.</p>
+        <div class="tabs">
+            <div class="tab active" data-tab="install">1. Install</div>
+            <div class="tab" data-tab="configure">2. Configure</div>
         </div>
 
-        <div class="card">
-            <h2>How It Works</h2>
-            <div class="steps">
-                <div class="step">
-                    <div class="step-content">
-                        <h3>Install Firmware</h3>
-                        <p>Connect your ESP32-C6 via USB and click Install below</p>
-                    </div>
+        <!-- Install Tab -->
+        <div id="install" class="tab-content active">
+            <div class="card">
+                <h2>Install Firmware</h2>
+                <p class="info">Connect your ESP32-C6 via USB and click Install. After installation, go to Configure tab to set up your LED strip.</p>
+                <div class="install-section">
+                    <esp-web-install-button manifest="manifest.json">
+                        <button slot="activate">Install TLED Firmware</button>
+                        <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome or Edge.</span>
+                        <span slot="not-allowed">Serial access not allowed. Make sure you're using HTTPS.</span>
+                    </esp-web-install-button>
                 </div>
-                <div class="step">
-                    <div class="step-content">
-                        <h3>Commission Device</h3>
-                        <p>Scan the QR code with your smart home app</p>
-                    </div>
-                </div>
-                <div class="step">
-                    <div class="step-content">
-                        <h3>Control Your LEDs</h3>
-                        <p>Adjust color, brightness, and effects from any Matter app</p>
-                    </div>
-                </div>
+            </div>
+
+            <div class="card">
+                <h2>After Installation</h2>
+                <p class="info">Go to the Configure tab to set your LED count, GPIO pin, and other settings. Then scan the QR code from the serial output with your smart home app.</p>
             </div>
         </div>
 
-        <div class="card">
-            <h2>Configuration</h2>
-            <p class="warning"><strong>Note:</strong> Configuration is set at compile time. This installer provides pre-built firmware with common configurations. For custom setups, build from source using <code>idf.py menuconfig</code>.</p>
-            <div class="config-grid">
-                <div class="config-item">
-                    <label for="variant">Firmware Variant</label>
-                    <select id="variant">
-                        <option value="default">Default (10 LEDs, GPIO5, WS2812B)</option>
-                        <option value="60led">60 LEDs (GPIO5, WS2812B)</option>
-                        <option value="144led">144 LEDs (GPIO5, WS2812B)</option>
-                    </select>
+        <!-- Configure Tab -->
+        <div id="configure" class="tab-content">
+            <div class="card">
+                <h2>Serial Configuration</h2>
+
+                <div id="connectionStatus" class="status disconnected">
+                    <span class="status-dot"></span>
+                    <span>Not connected</span>
+                </div>
+
+                <button id="connectBtn" class="btn" style="margin-bottom: 1rem;">Connect to Device</button>
+
+                <div class="config-grid">
+                    <div class="config-row">
+                        <div class="config-item">
+                            <label for="numLeds">Number of LEDs</label>
+                            <input type="number" id="numLeds" min="1" max="1000" value="10">
+                        </div>
+                        <div class="config-item">
+                            <label for="gpioPin">GPIO Pin</label>
+                            <input type="number" id="gpioPin" min="0" max="21" value="5">
+                        </div>
+                    </div>
+
+                    <div class="config-row">
+                        <div class="config-item">
+                            <label for="ledType">LED Type</label>
+                            <select id="ledType">
+                                <option value="ws2812b">WS2812B (most common)</option>
+                                <option value="ws2811">WS2811</option>
+                                <option value="sk6812">SK6812 (RGBW)</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label for="rgbOrder">RGB Order</label>
+                            <select id="rgbOrder">
+                                <option value="grb">GRB (most WS2812B)</option>
+                                <option value="rgb">RGB</option>
+                                <option value="bgr">BGR</option>
+                                <option value="rbg">RBG</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="config-item">
+                        <label for="maxBrightness">Max Brightness (1-255)</label>
+                        <input type="number" id="maxBrightness" min="1" max="255" value="255">
+                    </div>
+
+                    <button id="saveBtn" class="btn btn-success" disabled>Save Configuration</button>
                 </div>
             </div>
-        </div>
 
-        <div class="card install-section">
-            <esp-web-install-button id="installButton" manifest="manifest.json">
-                <button slot="activate">Install TLED</button>
-                <span slot="unsupported">
-                    Your browser doesn't support Web Serial.<br>
-                    Use Chrome or Edge on desktop.
-                </span>
-                <span slot="not-allowed">
-                    Serial access not allowed.<br>
-                    Make sure you're using HTTPS.
-                </span>
-            </esp-web-install-button>
-            <p class="requirements">
-                Requires <a href="https://caniuse.com/web-serial" target="_blank">Web Serial</a> (Chrome/Edge on desktop)
-            </p>
-        </div>
-
-        <div class="card">
-            <h2>After Installation</h2>
-            <p>Open a serial monitor to see the QR code URL for commissioning:</p>
-            <ol style="margin-top: 0.5rem; margin-left: 1.5rem; color: var(--text-muted);">
-                <li>Keep the device connected via USB</li>
-                <li>Open the browser's serial console or use a terminal app</li>
-                <li>Look for the QR code URL in the output</li>
-                <li>Scan the QR code with your smart home app</li>
-            </ol>
+            <div class="card">
+                <h2>Serial Console</h2>
+                <div id="terminal" class="terminal"></div>
+            </div>
         </div>
     </div>
 
     <footer>
-        <p>TLED is open source &bull; <a href="https://github.com/your-username/tled" target="_blank">View on GitHub</a></p>
+        <p>TLED is open source &bull; <a href="https://github.com/maui1911/TLED" target="_blank">View on GitHub</a></p>
         <p style="margin-top: 0.5rem;">Like WLED, but for Thread</p>
     </footer>
 
     <script>
-        // Update manifest based on selected variant
-        const variantSelect = document.getElementById('variant');
-        const installButton = document.getElementById('installButton');
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab).classList.add('active');
+            });
+        });
 
-        variantSelect.addEventListener('change', () => {
-            const variant = variantSelect.value;
-            if (variant === 'default') {
-                installButton.setAttribute('manifest', 'manifest.json');
+        // Serial configuration
+        let port = null;
+        let reader = null;
+        let writer = null;
+
+        const connectBtn = document.getElementById('connectBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const terminal = document.getElementById('terminal');
+        const connectionStatus = document.getElementById('connectionStatus');
+
+        function log(text, type = 'response') {
+            const span = document.createElement('span');
+            span.className = type;
+            span.textContent = text;
+            terminal.appendChild(span);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function updateStatus(connected) {
+            connectionStatus.className = 'status ' + (connected ? 'connected' : 'disconnected');
+            connectionStatus.innerHTML = `<span class="status-dot"></span><span>${connected ? 'Connected' : 'Not connected'}</span>`;
+            connectBtn.textContent = connected ? 'Disconnect' : 'Connect to Device';
+            saveBtn.disabled = !connected;
+        }
+
+        async function connect() {
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 });
+
+                const textDecoder = new TextDecoderStream();
+                const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+                reader = textDecoder.readable.getReader();
+
+                const textEncoder = new TextEncoderStream();
+                const writableStreamClosed = textEncoder.readable.pipeTo(port.writable);
+                writer = textEncoder.writable.getWriter();
+
+                updateStatus(true);
+                log('Connected to device\n', 'prompt');
+
+                // Send config command to get current settings
+                await sendCommand('config');
+
+                // Read loop
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    if (value) {
+                        log(value);
+                        parseConfig(value);
+                    }
+                }
+            } catch (e) {
+                log('Error: ' + e.message + '\n', 'error');
+                updateStatus(false);
+            }
+        }
+
+        async function disconnect() {
+            if (reader) {
+                await reader.cancel();
+                reader = null;
+            }
+            if (writer) {
+                await writer.close();
+                writer = null;
+            }
+            if (port) {
+                await port.close();
+                port = null;
+            }
+            updateStatus(false);
+            log('Disconnected\n', 'prompt');
+        }
+
+        async function sendCommand(cmd) {
+            if (writer) {
+                log('> ' + cmd + '\n', 'prompt');
+                await writer.write(cmd + '\r\n');
+            }
+        }
+
+        function parseConfig(text) {
+            // Parse config output and update form fields
+            const lines = text.split('\n');
+            for (const line of lines) {
+                const match = line.match(/^\s*(\w+)\s*=\s*(.+)$/);
+                if (match) {
+                    const [, key, value] = match;
+                    switch (key) {
+                        case 'leds':
+                            document.getElementById('numLeds').value = value.trim();
+                            break;
+                        case 'gpio':
+                            document.getElementById('gpioPin').value = value.trim();
+                            break;
+                        case 'brightness':
+                            document.getElementById('maxBrightness').value = value.trim();
+                            break;
+                        case 'type':
+                            document.getElementById('ledType').value = value.trim();
+                            break;
+                        case 'order':
+                            document.getElementById('rgbOrder').value = value.trim();
+                            break;
+                    }
+                }
+            }
+        }
+
+        connectBtn.addEventListener('click', async () => {
+            if (port) {
+                await disconnect();
             } else {
-                installButton.setAttribute('manifest', `manifest-${variant}.json`);
+                await connect();
             }
         });
+
+        saveBtn.addEventListener('click', async () => {
+            const numLeds = document.getElementById('numLeds').value;
+            const gpioPin = document.getElementById('gpioPin').value;
+            const ledType = document.getElementById('ledType').value;
+            const rgbOrder = document.getElementById('rgbOrder').value;
+            const maxBrightness = document.getElementById('maxBrightness').value;
+
+            await sendCommand(`set leds ${numLeds}`);
+            await new Promise(r => setTimeout(r, 100));
+            await sendCommand(`set gpio ${gpioPin}`);
+            await new Promise(r => setTimeout(r, 100));
+            await sendCommand(`set type ${ledType}`);
+            await new Promise(r => setTimeout(r, 100));
+            await sendCommand(`set order ${rgbOrder}`);
+            await new Promise(r => setTimeout(r, 100));
+            await sendCommand(`set brightness ${maxBrightness}`);
+            await new Promise(r => setTimeout(r, 100));
+            await sendCommand('save');
+        });
+
+        // Check for Web Serial support
+        if (!('serial' in navigator)) {
+            connectBtn.textContent = 'Web Serial not supported';
+            connectBtn.disabled = true;
+        }
     </script>
 </body>
 </html>

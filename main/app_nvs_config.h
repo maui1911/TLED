@@ -87,11 +87,20 @@ typedef struct {
 esp_err_t tled_config_init(void);
 
 /**
- * @brief Get pointer to current configuration
+ * @brief Get pointer to current configuration (read-only)
  *
- * @return Pointer to config structure (read-only recommended)
+ * @return Pointer to config structure
  */
 const tled_config_t* tled_config_get(void);
+
+/**
+ * @brief Get mutable pointer to current configuration
+ *
+ * Use for modifying config values. Call tled_config_save() to persist.
+ *
+ * @return Mutable pointer to config structure
+ */
+tled_config_t* tled_config_get_mutable(void);
 
 /**
  * @brief Check if device has been configured
@@ -137,4 +146,7 @@ void tled_config_reset_to_defaults(void);
  * @return true if pin is valid for LED data
  */
 bool tled_config_validate_gpio(uint8_t gpio_pin);
+
+// Alias for reset function
+#define tled_config_reset() tled_config_reset_to_defaults()
 
