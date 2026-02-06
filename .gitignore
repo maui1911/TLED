@@ -1,0 +1,22 @@
+# Build output
+build/
+
+# ESP-IDF managed components (downloaded dependencies)
+managed_components/
+
+# ESP-IDF config backups
+sdkconfig.old
+
+# Dependencies lock file (regenerated on build)
+dependencies.lock
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
