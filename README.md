@@ -12,12 +12,39 @@ A Matter-compatible LED strip controller for ESP32-C6 that works over Thread net
 - **USB configuration** - Change settings via serial without recompiling
 - **NVS persistence** - Settings survive reboots
 
-## Hardware Requirements
+## Hardware
 
-- **ESP32-C6 board** - Any board with USB-C (e.g., DFRobot Beetle ESP32-C6, ESP32-C6-DevKitC)
+This project was developed for the **[DFRobot Beetle ESP32-C6](https://wiki.dfrobot.com/SKU_DFR1117_Beetle_ESP32_C6)** - a tiny 25mm × 20.5mm board that's perfect for embedding in LED strip projects. Any ESP32-C6 board should work, but the Beetle's small size makes it ideal.
+
+### Requirements
+
+- **ESP32-C6 board** - DFRobot Beetle ESP32-C6 recommended (or any ESP32-C6)
 - **Addressable LED strip** - WS2812B, WS2811, or SK6812
 - **5V power supply** - Size for your LED count (~60mA per LED at full white)
 - **Thread border router** - HomePod Mini, Apple TV 4K, Google Nest Hub, or dedicated like SLZB-06/SMLight
+
+### 3D Printable Enclosure
+
+A parametric OpenSCAD enclosure design is included in the `enclosure/` folder, sized specifically for the DFRobot Beetle ESP32-C6.
+
+<p align="center">
+  <img src="enclosure/render_base_angled.png" alt="TLED Enclosure" width="400">
+  <img src="enclosure/render_usb_front.png" alt="USB Port and Wire Slit" width="400">
+</p>
+
+**Features:**
+- **Friction-fit lid** - No screws needed, snaps securely in place
+- **USB-C port cutout** - Easy access for flashing and power
+- **Wire slit** - Solder your wires first, then slide them into the enclosure
+- **Super compact** - Just slightly larger than the Beetle board itself
+
+**Printing tips:**
+- Print the base upside-down (opening facing up)
+- 0.2mm layer height works well
+- No supports needed
+- PLA or PETG recommended
+
+See `enclosure/tled_enclosure.scad` - open in OpenSCAD to customize dimensions and export STL files.
 
 ## Quick Start
 
@@ -150,6 +177,8 @@ TLED/
 ├── web-installer/
 │   ├── index.html            # Web installer & configurator
 │   └── manifest.json         # ESP Web Tools manifest
+├── enclosure/
+│   └── tled_enclosure.scad   # OpenSCAD parametric enclosure design
 ├── partitions.csv            # Flash partition layout
 └── sdkconfig.defaults        # Default SDK configuration
 ```
