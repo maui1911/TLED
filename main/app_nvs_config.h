@@ -27,6 +27,13 @@ typedef enum {
     CHIPSET_SK6812 = 2,
 } tled_chipset_t;
 
+// Power-on behavior options
+typedef enum {
+    POWER_ON_RESTORE = 0,   // Restore last state (default)
+    POWER_ON_ON = 1,        // Always turn on
+    POWER_ON_OFF = 2,       // Always stay off
+} tled_power_on_t;
+
 // Configuration structure
 typedef struct {
     uint16_t num_leds;          // Number of LEDs (1-1000)
@@ -34,6 +41,7 @@ typedef struct {
     uint8_t rgb_order;          // RGB byte order (tled_rgb_order_t)
     uint8_t chipset;            // LED chipset (tled_chipset_t)
     uint8_t max_brightness;     // Max brightness limit (0-255)
+    uint8_t power_on_behavior;  // Power-on behavior (tled_power_on_t)
     char device_name[32];       // Custom device name
     uint8_t config_version;     // Config version for migration
     bool configured;            // True if config has been set
@@ -75,7 +83,8 @@ typedef struct {
 #endif
 
 #define TLED_DEFAULT_DEVICE_NAME    "TLED"
-#define TLED_CONFIG_VERSION         1
+#define TLED_DEFAULT_POWER_ON       POWER_ON_RESTORE
+#define TLED_CONFIG_VERSION         2  // Bumped for power_on_behavior field
 
 /**
  * @brief Initialize the config module

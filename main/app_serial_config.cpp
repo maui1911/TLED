@@ -169,6 +169,7 @@ static void print_help(void) {
     serial_write("  set type <t>      - Set LED type: ws2812b, ws2811, sk6812\r\n");
     serial_write("  set order <o>     - Set RGB order: grb, rgb, bgr, rbg, grbw\r\n");
     serial_write("  set name <name>   - Set device name\r\n");
+    serial_write("  set poweron <m>   - Power-on behavior: restore, on, off\r\n");
     serial_write("  save              - Save config and reboot\r\n");
     serial_write("  reboot            - Reboot without saving\r\n");
     serial_write("  factory           - Reset to factory defaults\r\n");
@@ -194,12 +195,20 @@ static void print_config(void) {
         case 4: order_str = "grbw"; break;
     }
 
+    const char *poweron_str = "unknown";
+    switch (cfg->power_on_behavior) {
+        case POWER_ON_RESTORE: poweron_str = "restore"; break;
+        case POWER_ON_ON: poweron_str = "on"; break;
+        case POWER_ON_OFF: poweron_str = "off"; break;
+    }
+
     serial_write("\r\nCurrent configuration:\r\n");
     serial_printf("  leds       = %d\r\n", cfg->num_leds);
     serial_printf("  gpio       = %d\r\n", cfg->gpio_pin);
     serial_printf("  brightness = %d\r\n", cfg->max_brightness);
     serial_printf("  type       = %s\r\n", type_str);
     serial_printf("  order      = %s\r\n", order_str);
+    serial_printf("  poweron    = %s\r\n", poweron_str);
     serial_printf("  name       = %s\r\n", cfg->device_name);
     serial_write("\r\n");
 }
@@ -272,6 +281,20 @@ static void handle_set_command(const char *param, const char *value) {
         strncpy(cfg->device_name, value, sizeof(cfg->device_name) - 1);
         cfg->device_name[sizeof(cfg->device_name) - 1] = '\0';
         serial_printf("Set name = %s\r\n", cfg->device_name);
+    }
+    else if (strcmp(param, "poweron") == 0) {
+        if (strcmp(value, "restore") == 0) {
+            cfg->power_on_behavior = POWER_ON_RESTORE;
+            serial_write("Set poweron = restore (restore last state)\r\n");
+        } else if (strcmp(value, "on") == 0) {
+            cfg->power_on_behavior = POWER_ON_ON;
+            serial_write("Set poweron = on (always turn on)\r\n");
+        } else if (strcmp(value, "off") == 0) {
+            cfg->power_on_behavior = POWER_ON_OFF;
+            serial_write("Set poweron = off (always stay off)\r\n");
+        } else {
+            serial_write("Error: poweron must be restore, on, or off\r\n");
+        }
     }
     else {
         serial_printf("Unknown parameter: %s\r\n", param);

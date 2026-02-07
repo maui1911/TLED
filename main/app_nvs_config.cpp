@@ -31,6 +31,7 @@ static void set_defaults(tled_config_t *config)
     config->rgb_order = TLED_DEFAULT_RGB_ORDER;
     config->chipset = TLED_DEFAULT_CHIPSET;
     config->max_brightness = TLED_DEFAULT_MAX_BRIGHTNESS;
+    config->power_on_behavior = TLED_DEFAULT_POWER_ON;
     strncpy(config->device_name, TLED_DEFAULT_DEVICE_NAME, sizeof(config->device_name) - 1);
     config->device_name[sizeof(config->device_name) - 1] = '\0';
     config->config_version = TLED_CONFIG_VERSION;
@@ -61,6 +62,12 @@ static bool validate_config(const tled_config_t *config)
     // Check chipset
     if (config->chipset > CHIPSET_SK6812) {
         ESP_LOGW(TAG, "Invalid chipset: %d", config->chipset);
+        return false;
+    }
+
+    // Check power-on behavior
+    if (config->power_on_behavior > POWER_ON_OFF) {
+        ESP_LOGW(TAG, "Invalid power-on behavior: %d", config->power_on_behavior);
         return false;
     }
 

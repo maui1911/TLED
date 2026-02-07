@@ -22,6 +22,7 @@
 #include "app_ble_config.h"
 #include "app_serial_config.h"
 #include "app_device_info.h"
+#include "app_monitoring.h"
 #include <app_reset.h>
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
@@ -31,16 +32,18 @@
 #include <app/server/CommissioningWindowManager.h>
 #include <app/server/Server.h>
 #include <setup_payload/OnboardingCodesUtil.h>
+#include <platform/CHIPDeviceLayer.h>
 
 // Version string from CMakeLists.txt
 #ifndef PROJECT_VER
-#define PROJECT_VER "0.5.0"
+#define PROJECT_VER "unknown"
 #endif
 
 static const char *TAG = "tled_main";
 
-// Global endpoint ID for the light
+// Global endpoint IDs
 uint16_t light_endpoint_id = 0;
+uint16_t temp_sensor_endpoint_id = 0;
 
 using namespace esp_matter;
 using namespace esp_matter::attribute;
@@ -48,6 +51,40 @@ using namespace esp_matter::endpoint;
 using namespace chip::app::Clusters;
 
 constexpr auto k_timeout_seconds = 300;
+
+// Temperature update interval (5 seconds)
+#define TEMP_UPDATE_INTERVAL_MS 5000
+
+// Task to periodically update the temperature attribute
+static void temp_update_task(void *pvParameters)
+{
+    // Wait for Matter stack to be ready
+    vTaskDelay(pdMS_TO_TICKS(10000));
+
+    while (true) {
+        float temp = monitoring_get_temperature();
+
+        // Only update if we got a valid reading
+        if (temp > -900.0f) {
+            uint16_t endpoint_id = temp_sensor_endpoint_id;
+            int16_t temp_value = static_cast<int16_t>(temp * 100);  // Convert to 0.01°C units
+
+            // Schedule the attribute update on the Matter thread
+            chip::DeviceLayer::SystemLayer().ScheduleLambda([endpoint_id, temp_value]() {
+                attribute_t *attr = attribute::get(endpoint_id,
+                                                   TemperatureMeasurement::Id,
+                                                   TemperatureMeasurement::Attributes::MeasuredValue::Id);
+                if (attr) {
+                    esp_matter_attr_val_t val = esp_matter_nullable_int16(temp_value);
+                    attribute::update(endpoint_id, TemperatureMeasurement::Id,
+                                     TemperatureMeasurement::Attributes::MeasuredValue::Id, &val);
+                }
+            });
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(TEMP_UPDATE_INTERVAL_MS));
+    }
+}
 
 // Check if boot button is held
 static bool is_button_held(uint32_t hold_time_ms)
@@ -276,6 +313,20 @@ extern "C" void app_main()
     light_endpoint_id = endpoint::get_id(endpoint);
     ESP_LOGI(TAG, "Color Light (HSV) created with endpoint_id %d", light_endpoint_id);
 
+    /* Create Temperature Sensor endpoint to expose chip temperature */
+    temperature_sensor::config_t temp_config;
+    // ESP32-C6 internal sensor range: -10°C to 80°C (in 0.01°C units)
+    temp_config.temperature_measurement.min_measured_value = nullable<int16_t>(-1000);  // -10°C
+    temp_config.temperature_measurement.max_measured_value = nullable<int16_t>(8000);   // 80°C
+    // Initial value will be set when first reading comes in
+    temp_config.temperature_measurement.measured_value = nullable<int16_t>();
+
+    endpoint_t *temp_endpoint = temperature_sensor::create(node, &temp_config, ENDPOINT_FLAG_NONE, nullptr);
+    ABORT_APP_ON_FAILURE(temp_endpoint != nullptr, ESP_LOGE(TAG, "Failed to create temperature sensor endpoint"));
+
+    temp_sensor_endpoint_id = endpoint::get_id(temp_endpoint);
+    ESP_LOGI(TAG, "Temperature Sensor created with endpoint_id %d", temp_sensor_endpoint_id);
+
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
     /* Set OpenThread platform config */
     esp_openthread_platform_config_t ot_config = {
@@ -306,6 +357,17 @@ extern "C" void app_main()
 
     /* Initialize serial configuration interface */
     serial_config_init();
+
+    /* Initialize health monitoring (watchdog, heap, thermal) */
+    monitoring_init();
+
+    /* Start temperature update task (updates Matter attribute from sensor) */
+    BaseType_t task_ret = xTaskCreate(temp_update_task, "temp_update", 2048, NULL, 1, NULL);
+    if (task_ret != pdPASS) {
+        ESP_LOGW(TAG, "Failed to create temperature update task");
+    } else {
+        ESP_LOGI(TAG, "Temperature update task started (interval: %dms)", TEMP_UPDATE_INTERVAL_MS);
+    }
 
     ESP_LOGI(TAG, "TLED initialization complete. Waiting for commissioning...");
     ESP_LOGI(TAG, "Serial config available - connect via USB and type 'help'");

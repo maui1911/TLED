@@ -726,8 +726,28 @@ esp_err_t app_driver_light_set_defaults(uint16_t endpoint_id)
     void *priv_data = endpoint::get_priv_data(endpoint_id);
     light_driver_t *driver = (light_driver_t *)priv_data;
 
+    // Get power-on behavior from config
+    const tled_config_t *config = tled_config_get();
+    uint8_t power_on_behavior = config->power_on_behavior;
+
     // Try to load saved state from NVS first
     if (load_state_from_nvs() == ESP_OK) {
+        // Apply power-on behavior override
+        bool original_power = driver->power;
+        switch (power_on_behavior) {
+            case POWER_ON_RESTORE:
+                // Keep the restored power state
+                break;
+            case POWER_ON_ON:
+                driver->power = true;
+                ESP_LOGI(TAG, "Power-on behavior: forcing ON");
+                break;
+            case POWER_ON_OFF:
+                driver->power = false;
+                ESP_LOGI(TAG, "Power-on behavior: forcing OFF");
+                break;
+        }
+
         // Successfully loaded saved state - update Matter attributes to match
         esp_matter_attr_val_t val;
 
@@ -745,8 +765,8 @@ esp_err_t app_driver_light_set_defaults(uint16_t endpoint_id)
 
         driver->color_mode = COLOR_MODE_HSV;
 
-        ESP_LOGI(TAG, "Restored from NVS: power=%d, brightness=%d, hue=%d, sat=%d",
-                 driver->power, driver->brightness, driver->hue, driver->saturation);
+        ESP_LOGI(TAG, "Restored from NVS: power=%d (was %d), brightness=%d, hue=%d, sat=%d",
+                 driver->power, original_power, driver->brightness, driver->hue, driver->saturation);
 
         // Initialize transition state
         driver->transition.current_hue = driver->hue;

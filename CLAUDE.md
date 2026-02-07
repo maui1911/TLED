@@ -3,7 +3,7 @@
 ## Project Overview
 ESP32-C6 based LED controller using Matter protocol over Thread network. Like WLED, but for Thread.
 
-## Current Status: Phase 4b Complete
+## Current Status: Phase 5 (Production Polish) - In Progress
 
 ### What's Working
 - **On/Off control** via Home Assistant
@@ -16,6 +16,11 @@ ESP32-C6 based LED controller using Matter protocol over Thread network. Like WL
 - **Built-in effects** - rainbow, breathing, candle, chase (API only for now)
 - **Serial configuration** - configure LED count, GPIO, type via USB serial
 - **Web installer** - flash firmware from browser (GitHub Pages)
+- **Health monitoring** - periodic heap/temperature logging
+- **Watchdog** - automatic reboot on hang (configurable timeout)
+- **Power-on behavior** - restore/on/off modes via serial config
+- **Temperature sensor** - internal chip temp monitoring with warnings
+- **Temperature cluster** - chip temp exposed to Home Assistant as sensor entity
 
 ### Hardware Configuration
 - **Board:** DFRobot Beetle ESP32-C6 (or any ESP32-C6)
@@ -111,6 +116,13 @@ Restored on boot before Matter attributes are applied.
 - Device automatically becomes router when mesh needs it
 - No special configuration needed - just keep it powered
 
+### Temperature Measurement Cluster
+- Endpoint 2 exposes ESP32-C6's internal temperature sensor to Home Assistant
+- Updates every 5 seconds via dedicated FreeRTOS task
+- Temperature in 0.01°C units (Matter spec): 2500 = 25.00°C
+- Range: -10°C to 80°C (ESP32-C6 internal sensor limits)
+- If sensor fails to initialize, endpoint shows "unavailable"
+
 ### Transition API
 ```c
 // Set brightness with custom transition time
@@ -133,6 +145,14 @@ app_driver_light_set_effect(handle, effect_id);
 | 4 | ✅ Done | Kconfig + NVS config system |
 | 4b | ✅ Done | Web installer + serial config + device branding |
 | 5 | ⏳ | OTA updates, watchdog, safety features |
+
+### v0.6.0 Features (Phase 5 In Progress)
+- Health monitoring: heap usage, temperature logging every 60s
+- Watchdog timer with panic reboot (configurable timeout)
+- Power-on behavior: restore/on/off modes
+- Internal temperature sensor with warnings (70°C/85°C thresholds)
+- Temperature Measurement cluster: exposes chip temp to Home Assistant (endpoint 2)
+- OTA infrastructure ready (JSON metadata, OTA image creation)
 
 ### v0.5.0 Features (Phase 4b Complete)
 - Custom device branding: Shows "TLED" / "Matter LED Controller" in Home Assistant
@@ -210,16 +230,19 @@ idf.py build
 2. ✅ GitHub Actions workflow for Pages deployment
 3. ✅ Serial configuration interface
 4. ✅ Custom device branding (DeviceInstanceInfoProvider)
-5. ⏳ OTA updates via Matter
-6. ⏳ Watchdog timer and crash recovery
-7. ⏳ Thermal monitoring and safety features
-8. ⏳ Power-on behavior settings
+5. ⚠️ OTA updates via Matter - **blocked by ESP-Matter bug** (see Known Issues)
+6. ✅ Watchdog timer and crash recovery
+7. ✅ Thermal monitoring and safety features
+8. ✅ Power-on behavior settings
 9. ⏳ TLED enclosure design
+10. ✅ Temperature Measurement cluster (expose chip temp to Home Assistant)
 
 ## Known Issues / Notes
 - First commission after erase-flash may take a moment
 - Thread connection can be weak if far from border router
 - After flashing without erase, device keeps its commissioning
+- **Adding/removing endpoints requires re-commissioning**: If you flash firmware that changes the endpoint structure (like adding the temperature sensor), you need to remove and re-add the device in Home Assistant
+- **Matter OTA crashes on ESP32-C6**: Device crashes during BDX download with `abort()` in `GetMonotonicTimestamp()`. Tried increasing stack sizes (up to 16KB), watchdog timeout (120s), and reducing firmware size - none worked. This appears to be a bug in ESP-Matter SDK. Use USB flashing via web installer instead.
 
 ## Environment
 - ESP-IDF: v5.4.1
