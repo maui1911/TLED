@@ -28,8 +28,8 @@ This project was developed for the **[DFRobot Beetle ESP32-C6](https://wiki.dfro
 A parametric OpenSCAD enclosure design is included in the `enclosure/` folder, sized specifically for the DFRobot Beetle ESP32-C6.
 
 <p align="center">
-  <img src="enclosure/render_base_angled.png" alt="TLED Enclosure" width="400">
-  <img src="enclosure/render_usb_front.png" alt="USB Port and Wire Slit" width="400">
+  <img src="enclosure/render_assembly.png" alt="TLED Enclosure Assembly" width="400">
+  <img src="enclosure/render_closed.png" alt="TLED Enclosure Closed" width="400">
 </p>
 
 **Features:**
