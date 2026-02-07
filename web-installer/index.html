@@ -6,79 +6,551 @@
     <title>TLED - Matter-over-Thread LED Controller</title>
     <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --primary: #6366f1;
-            --primary-dark: #4f46e5;
-            --success: #22c55e;
-            --bg: #0f172a;
-            --surface: #1e293b;
-            --text: #f1f5f9;
-            --text-muted: #94a3b8;
-            --border: #334155;
+            --cyan: #00ffd5;
+            --cyan-dim: #00ffd540;
+            --cyan-glow: #00ffd580;
+            --green: #39ff14;
+            --amber: #ffb800;
+            --red: #ff3b3b;
+            --bg-deep: #0a0c0f;
+            --bg: #0d1117;
+            --bg-surface: #161b22;
+            --bg-elevated: #1c2128;
+            --border: #30363d;
+            --border-bright: #484f58;
+            --text: #e6edf3;
+            --text-dim: #8b949e;
+            --trace: #1a3a35;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
+        html {
+            background: var(--bg-deep);
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Outfit', -apple-system, sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
-            padding: 2rem 1rem;
+            position: relative;
+            overflow-x: hidden;
         }
 
-        .container { max-width: 600px; margin: 0 auto; }
-
-        header { text-align: center; margin-bottom: 2rem; }
-
-        h1 {
-            font-size: 2.5rem;
-            margin-bottom: 0.5rem;
-            background: linear-gradient(135deg, #818cf8, #c084fc);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+        /* PCB trace pattern background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image:
+                linear-gradient(90deg, var(--trace) 1px, transparent 1px),
+                linear-gradient(var(--trace) 1px, transparent 1px),
+                radial-gradient(circle at 25% 25%, var(--trace) 2px, transparent 2px),
+                radial-gradient(circle at 75% 75%, var(--trace) 2px, transparent 2px);
+            background-size: 60px 60px, 60px 60px, 120px 120px, 120px 120px;
+            opacity: 0.4;
+            pointer-events: none;
+            z-index: 0;
         }
 
-        .tagline { color: var(--text-muted); font-size: 1.1rem; }
+        /* Scanline effect */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.03) 2px,
+                rgba(0, 0, 0, 0.03) 4px
+            );
+            pointer-events: none;
+            z-index: 1000;
+        }
 
+        .container {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem 4rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Header */
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding-top: 1rem;
+        }
+
+        .logo-container {
+            position: relative;
+            display: inline-block;
+            margin-bottom: 1rem;
+        }
+
+        .logo {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 4.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--cyan);
+            text-shadow:
+                0 0 20px var(--cyan-glow),
+                0 0 40px var(--cyan-dim),
+                0 0 60px var(--cyan-dim);
+            animation: flicker 4s infinite;
+            position: relative;
+        }
+
+        .logo::before {
+            content: 'TLED';
+            position: absolute;
+            top: 0;
+            left: 0;
+            color: var(--cyan);
+            opacity: 0.5;
+            animation: glitch 3s infinite;
+            clip-path: inset(0 0 50% 0);
+        }
+
+        @keyframes flicker {
+            0%, 100% { opacity: 1; }
+            92% { opacity: 1; }
+            93% { opacity: 0.8; }
+            94% { opacity: 1; }
+            96% { opacity: 0.9; }
+            97% { opacity: 1; }
+        }
+
+        @keyframes glitch {
+            0%, 100% { transform: translate(0); }
+            20% { transform: translate(-2px, 1px); }
+            40% { transform: translate(2px, -1px); }
+            60% { transform: translate(-1px, 2px); }
+            80% { transform: translate(1px, -2px); }
+        }
+
+        .version-badge {
+            display: inline-block;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            font-weight: 500;
+            color: var(--bg);
+            background: var(--cyan);
+            padding: 0.2rem 0.5rem;
+            border-radius: 2px;
+            margin-left: 0.5rem;
+            vertical-align: super;
+            letter-spacing: 0.05em;
+        }
+
+        .tagline {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-dim);
+            font-size: 0.9rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .tagline span {
+            color: var(--green);
+        }
+
+        /* Navigation Tabs */
         .tabs {
             display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1.5rem;
+            gap: 2px;
+            margin-bottom: 2rem;
+            background: var(--border);
+            padding: 2px;
+            border-radius: 4px;
         }
 
         .tab {
             flex: 1;
-            padding: 0.75rem;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            color: var(--text-muted);
+            padding: 0.9rem 1rem;
+            background: transparent;
+            border: none;
+            color: var(--text-dim);
             cursor: pointer;
-            text-align: center;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
             font-weight: 500;
-            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            transition: all 0.2s ease;
+            position: relative;
         }
 
-        .tab:hover { border-color: var(--primary); }
-        .tab.active { background: var(--primary); color: white; border-color: var(--primary); }
+        .tab:hover {
+            color: var(--text);
+            background: var(--bg-elevated);
+        }
+
+        .tab.active {
+            background: var(--bg-surface);
+            color: var(--cyan);
+        }
+
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--cyan);
+            box-shadow: 0 0 10px var(--cyan-glow);
+        }
 
         .tab-content { display: none; }
-        .tab-content.active { display: block; }
-
-        .card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.3s ease;
         }
 
-        .card h2 { font-size: 1.2rem; margin-bottom: 1rem; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
 
-        .config-grid { display: grid; gap: 1rem; }
+        /* Cards */
+        .card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.75rem;
+            margin-bottom: 1.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--cyan-dim), transparent);
+        }
+
+        .card h2 {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--cyan);
+            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .card h2::before {
+            content: '//';
+            color: var(--text-dim);
+            font-weight: 400;
+        }
+
+        .info {
+            color: var(--text-dim);
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin-bottom: 1rem;
+        }
+
+        /* Install Section */
+        .install-hero {
+            text-align: center;
+            padding: 2rem 1rem;
+            position: relative;
+        }
+
+        .chip-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 1.5rem;
+            position: relative;
+        }
+
+        .chip-icon svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .install-hero h3 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.4rem;
+            font-weight: 500;
+            margin-bottom: 0.75rem;
+        }
+
+        .install-hero p {
+            color: var(--text-dim);
+            font-size: 0.9rem;
+            max-width: 400px;
+            margin: 0 auto 2rem;
+            line-height: 1.5;
+        }
+
+        esp-web-install-button {
+            display: block;
+        }
+
+        esp-web-install-button::part(button) {
+            font-family: 'JetBrains Mono', monospace;
+            background: linear-gradient(135deg, var(--cyan), #00c4a7);
+            color: var(--bg-deep);
+            border: none;
+            border-radius: 6px;
+            padding: 1rem 2.5rem;
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow:
+                0 0 20px var(--cyan-dim),
+                0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        esp-web-install-button::part(button):hover {
+            transform: translateY(-2px);
+            box-shadow:
+                0 0 30px var(--cyan-glow),
+                0 8px 30px rgba(0, 0, 0, 0.4);
+        }
+
+        esp-web-install-button [slot="unsupported"],
+        esp-web-install-button [slot="not-allowed"] {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--amber);
+            background: rgba(255, 184, 0, 0.1);
+            padding: 1rem;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 184, 0, 0.3);
+        }
+
+        /* Steps */
+        .steps {
+            display: grid;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .step {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+        }
+
+        .step-num {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--bg);
+            background: var(--cyan);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .step-text {
+            font-size: 0.9rem;
+            color: var(--text-dim);
+            padding-top: 2px;
+        }
+
+        .step-text strong {
+            color: var(--text);
+            font-weight: 500;
+        }
+
+        /* Configuration Section */
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.875rem 1rem;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            margin-bottom: 1.25rem;
+            border: 1px solid;
+        }
+
+        .status.disconnected {
+            background: rgba(255, 184, 0, 0.08);
+            border-color: rgba(255, 184, 0, 0.25);
+            color: var(--amber);
+        }
+
+        .status.connected {
+            background: rgba(57, 255, 20, 0.08);
+            border-color: rgba(57, 255, 20, 0.25);
+            color: var(--green);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            box-shadow: 0 0 8px currentColor;
+            animation: pulse 2s infinite;
+        }
+
+        .status.connected .status-dot {
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Buttons */
+        .btn-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .btn-row .btn { flex: 1; }
+
+        .btn {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg-elevated);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.75rem 1.25rem;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .btn:hover:not(:disabled) {
+            background: var(--border);
+            border-color: var(--border-bright);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--cyan);
+            color: var(--bg-deep);
+            border-color: var(--cyan);
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #00e6c0;
+            border-color: #00e6c0;
+            box-shadow: 0 0 15px var(--cyan-dim);
+        }
+
+        .btn-success {
+            background: var(--green);
+            color: var(--bg-deep);
+            border-color: var(--green);
+        }
+
+        .btn-success:hover:not(:disabled) {
+            background: #32e610;
+            border-color: #32e610;
+            box-shadow: 0 0 15px rgba(57, 255, 20, 0.4);
+        }
+
+        .btn-danger {
+            background: transparent;
+            color: var(--red);
+            border-color: var(--red);
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: var(--red);
+            color: var(--bg-deep);
+        }
+
+        /* QR Card */
+        .qr-card {
+            background: linear-gradient(135deg, #0d2818, #0d1117);
+            border: 1px solid rgba(57, 255, 20, 0.3);
+            padding: 1.25rem;
+            border-radius: 8px;
+            margin-bottom: 1.25rem;
+            display: none;
+            text-align: center;
+        }
+
+        .qr-card.visible {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .qr-card h3 {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--green);
+            margin-bottom: 0.75rem;
+        }
+
+        .qr-card p {
+            color: var(--text-dim);
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+
+        #qrCodeContainer {
+            background: #fff;
+            padding: 1rem;
+            border-radius: 8px;
+            display: inline-block;
+            margin-bottom: 0.75rem;
+        }
+
+        #manualCode {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-dim);
+            font-size: 0.8rem;
+        }
+
+        /* Config Grid */
+        .config-grid {
+            display: grid;
+            gap: 1.25rem;
+        }
 
         .config-row {
             display: grid;
@@ -86,188 +558,352 @@
             gap: 1rem;
         }
 
-        .config-item { display: flex; flex-direction: column; gap: 0.5rem; }
+        .config-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
 
-        .config-item label { font-size: 0.9rem; color: var(--text-muted); }
+        .config-item label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            font-weight: 500;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
 
         .config-item select,
         .config-item input {
+            font-family: 'JetBrains Mono', monospace;
             background: var(--bg);
             border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 0.75rem;
+            border-radius: 6px;
+            padding: 0.75rem 1rem;
             color: var(--text);
-            font-size: 1rem;
+            font-size: 0.9rem;
             width: 100%;
+            transition: all 0.2s ease;
         }
 
         .config-item select:focus,
         .config-item input:focus {
             outline: none;
-            border-color: var(--primary);
+            border-color: var(--cyan);
+            box-shadow: 0 0 0 3px var(--cyan-dim);
         }
 
-        .btn {
-            background: var(--primary);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 0.75rem 1.5rem;
-            font-size: 1rem;
-            font-weight: 600;
+        .config-item select {
             cursor: pointer;
-            transition: background 0.2s;
-            width: 100%;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238b949e' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 1rem center;
+            padding-right: 2.5rem;
         }
 
-        .btn:hover { background: var(--primary-dark); }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .btn-success { background: var(--success); }
-        .btn-success:hover { background: #16a34a; }
-
-        .install-section { text-align: center; padding: 1rem 0; }
-
-        esp-web-install-button::part(button) {
-            background: var(--primary);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 1rem 2rem;
-            font-size: 1.1rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-
-        esp-web-install-button::part(button):hover { background: var(--primary-dark); }
-
+        /* Terminal */
         .terminal {
             background: #000;
-            border-radius: 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
             padding: 1rem;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 0.85rem;
-            height: 200px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            height: 220px;
             overflow-y: auto;
             white-space: pre-wrap;
             word-break: break-all;
+            line-height: 1.5;
         }
 
-        .terminal .prompt { color: #22c55e; }
-        .terminal .response { color: #94a3b8; }
-        .terminal .error { color: #ef4444; }
-        .terminal .qr-link { color: #60a5fa; text-decoration: underline; cursor: pointer; }
-
-        .qr-card {
-            background: linear-gradient(135deg, #1e3a5f, #1e293b);
-            border: 2px solid #3b82f6;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1rem;
-            display: none;
+        .terminal::-webkit-scrollbar {
+            width: 8px;
         }
 
-        .qr-card.visible { display: block; }
+        .terminal::-webkit-scrollbar-track {
+            background: #000;
+        }
 
-        .qr-card h3 { color: #60a5fa; margin-bottom: 0.5rem; font-size: 1rem; }
+        .terminal::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
 
-        .qr-card a {
-            color: #93c5fd;
-            word-break: break-all;
+        .terminal .prompt { color: var(--cyan); }
+        .terminal .response { color: var(--text-dim); }
+        .terminal .error { color: var(--red); }
+
+        .serial-input-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        .serial-input-row input {
+            flex: 1;
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.6rem 1rem;
+            color: var(--text);
             font-size: 0.85rem;
         }
 
-        .btn-row {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
+        .serial-input-row input:focus {
+            outline: none;
+            border-color: var(--cyan);
         }
 
-        .btn-row .btn { flex: 1; }
+        .serial-input-row input::placeholder {
+            color: var(--text-dim);
+        }
 
-        .btn-secondary {
-            background: var(--surface);
+        .quick-cmds {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .quick-cmd {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+            padding: 0.4rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .quick-cmd:hover:not(:disabled) {
+            border-color: var(--cyan);
+            color: var(--cyan);
+        }
+
+        .quick-cmd:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .quick-cmd.danger {
+            border-color: rgba(255, 59, 59, 0.4);
+            color: var(--red);
+        }
+
+        .quick-cmd.danger:hover:not(:disabled) {
+            background: var(--red);
+            color: var(--bg-deep);
+            border-color: var(--red);
+        }
+
+        /* Help Section */
+        .help-section {
+            color: var(--text-dim);
+            font-size: 0.9rem;
+            line-height: 1.7;
+        }
+
+        .help-section p {
+            margin-bottom: 0.75rem;
+        }
+
+        .help-section strong {
+            color: var(--text);
+            font-weight: 500;
+        }
+
+        .help-section ul,
+        .help-section ol {
+            margin: 0.5rem 0 1rem 1.5rem;
+        }
+
+        .help-section li {
+            margin-bottom: 0.4rem;
+        }
+
+        .help-section code {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg);
+            padding: 0.15rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.85em;
+            color: var(--cyan);
+        }
+
+        .cmd-list {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+        }
+
+        .cmd-list p {
+            display: grid;
+            grid-template-columns: 180px 1fr;
+            gap: 1rem;
+            padding: 0.4rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .cmd-list p:last-child {
+            border-bottom: none;
+        }
+
+        .cmd-list strong {
+            color: var(--cyan);
+        }
+
+        /* Features Grid */
+        .features {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .feature {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            background: var(--bg);
+            border-radius: 6px;
             border: 1px solid var(--border);
         }
 
-        .btn-secondary:hover { background: var(--border); }
-
-        .btn-danger { background: #dc2626; }
-        .btn-danger:hover { background: #b91c1c; }
-
-        .status {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-            padding: 0.75rem;
-            border-radius: 8px;
-            font-size: 0.9rem;
+        .feature-icon {
+            font-size: 1.25rem;
+            line-height: 1;
         }
 
-        .status.disconnected { background: #422006; color: #fbbf24; }
-        .status.connected { background: #14532d; color: #4ade80; }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: currentColor;
+        .feature-text {
+            font-size: 0.85rem;
+            color: var(--text-dim);
         }
 
+        .feature-text strong {
+            display: block;
+            color: var(--text);
+            font-size: 0.8rem;
+            margin-bottom: 0.2rem;
+        }
+
+        /* Footer */
         footer {
             text-align: center;
-            color: var(--text-muted);
-            font-size: 0.85rem;
-            margin-top: 2rem;
+            padding: 2rem 0;
+            border-top: 1px solid var(--border);
+            margin-top: 3rem;
         }
 
-        footer a { color: var(--primary); text-decoration: none; }
+        footer p {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            letter-spacing: 0.05em;
+        }
 
-        .info { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem; }
+        footer a {
+            color: var(--cyan);
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
 
-        @media (max-width: 480px) {
-            h1 { font-size: 2rem; }
+        footer a:hover {
+            color: var(--text);
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .logo { font-size: 3rem; }
             .config-row { grid-template-columns: 1fr; }
+            .features { grid-template-columns: 1fr; }
+            .cmd-list p {
+                grid-template-columns: 1fr;
+                gap: 0.25rem;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>TLED</h1>
-            <p class="tagline">Matter-over-Thread LED Controller</p>
+            <div class="logo-container">
+                <div class="logo">TLED<span class="version-badge">v0.6</span></div>
+            </div>
+            <p class="tagline">Matter <span>+</span> Thread <span>+</span> LEDs</p>
         </header>
 
         <div class="tabs">
-            <div class="tab active" data-tab="install">1. Install</div>
-            <div class="tab" data-tab="configure">2. Configure</div>
-            <div class="tab" data-tab="help">Help</div>
+            <button class="tab active" data-tab="install">Flash</button>
+            <button class="tab" data-tab="configure">Configure</button>
+            <button class="tab" data-tab="help">Docs</button>
         </div>
 
         <!-- Install Tab -->
         <div id="install" class="tab-content active">
             <div class="card">
-                <h2>Install Firmware</h2>
-                <p class="info">Connect your ESP32-C6 via USB and click Install. After installation, go to Configure tab to set up your LED strip.</p>
-                <div class="install-section">
+                <div class="install-hero">
+                    <div class="chip-icon">
+                        <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="20" y="20" width="40" height="40" rx="4" stroke="var(--cyan)" stroke-width="2"/>
+                            <rect x="28" y="28" width="24" height="24" rx="2" fill="var(--bg-elevated)" stroke="var(--cyan)" stroke-width="1"/>
+                            <circle cx="40" cy="40" r="6" fill="var(--cyan)" opacity="0.3"/>
+                            <circle cx="40" cy="40" r="3" fill="var(--cyan)"/>
+                            <!-- Pins -->
+                            <line x1="30" y1="20" x2="30" y2="10" stroke="var(--cyan)" stroke-width="2"/>
+                            <line x1="40" y1="20" x2="40" y2="10" stroke="var(--cyan)" stroke-width="2"/>
+                            <line x1="50" y1="20" x2="50" y2="10" stroke="var(--cyan)" stroke-width="2"/>
+                            <line x1="30" y1="60" x2="30" y2="70" stroke="var(--cyan)" stroke-width="2"/>
+                            <line x1="40" y1="60" x2="40" y2="70" stroke="var(--cyan)" stroke-width="2"/>
+                            <line x1="50" y1="60" x2="50" y2="70" stroke="var(--cyan)" stroke-width="2"/>
+                            <line x1="20" y1="30" x2="10" y2="30" stroke="var(--cyan)" stroke-width="2"/>
+                            <line x1="20" y1="40" x2="10" y2="40" stroke="var(--cyan)" stroke-width="2"/>
+                            <line x1="20" y1="50" x2="10" y2="50" stroke="var(--cyan)" stroke-width="2"/>
+                            <line x1="60" y1="30" x2="70" y2="30" stroke="var(--cyan)" stroke-width="2"/>
+                            <line x1="60" y1="40" x2="70" y2="40" stroke="var(--cyan)" stroke-width="2"/>
+                            <line x1="60" y1="50" x2="70" y2="50" stroke="var(--cyan)" stroke-width="2"/>
+                        </svg>
+                    </div>
+                    <h3>Flash Firmware to ESP32-C6</h3>
+                    <p>Connect your board via USB and click below. Works directly in Chrome or Edge - no software install needed.</p>
                     <esp-web-install-button manifest="manifest.json">
-                        <button slot="activate">Install TLED Firmware</button>
-                        <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome or Edge.</span>
-                        <span slot="not-allowed">Serial access not allowed. Make sure you're using HTTPS.</span>
+                        <button slot="activate">Install TLED</button>
+                        <span slot="unsupported">Web Serial not supported. Use Chrome or Edge on desktop.</span>
+                        <span slot="not-allowed">Serial access blocked. Ensure you're using HTTPS.</span>
                     </esp-web-install-button>
                 </div>
             </div>
 
             <div class="card">
-                <h2>After Installation</h2>
-                <p class="info">Go to the Configure tab to set your LED count, GPIO pin, and other settings. Then scan the QR code from the serial output with your smart home app.</p>
+                <h2>After Flashing</h2>
+                <div class="steps">
+                    <div class="step">
+                        <span class="step-num">1</span>
+                        <span class="step-text">Go to <strong>Configure</strong> tab and connect to your device</span>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">2</span>
+                        <span class="step-text">Set your <strong>LED count</strong>, <strong>GPIO pin</strong>, and strip type</span>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">3</span>
+                        <span class="step-text">Click <strong>Save & Reboot</strong> to apply settings</span>
+                    </div>
+                    <div class="step">
+                        <span class="step-num">4</span>
+                        <span class="step-text">Scan the <strong>QR code</strong> with Home Assistant or Apple Home</span>
+                    </div>
+                </div>
             </div>
         </div>
 
         <!-- Configure Tab -->
         <div id="configure" class="tab-content">
             <div class="card">
-                <h2>Serial Configuration</h2>
+                <h2>Device Connection</h2>
 
                 <div id="connectionStatus" class="status disconnected">
                     <span class="status-dot"></span>
@@ -275,17 +911,20 @@
                 </div>
 
                 <div class="btn-row">
-                    <button id="connectBtn" class="btn">Connect to Device</button>
-                    <button id="rebootBtn" class="btn btn-secondary" disabled>Reboot</button>
+                    <button id="connectBtn" class="btn btn-primary">Connect</button>
+                    <button id="rebootBtn" class="btn" disabled>Reboot</button>
                 </div>
 
                 <div id="qrCard" class="qr-card">
-                    <h3>📱 Commission QR Code</h3>
-                    <p style="margin-bottom: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">Scan this with your Home Assistant or Apple Home app:</p>
-                    <div id="qrCodeContainer" style="background: white; padding: 1rem; border-radius: 8px; display: inline-block; margin-bottom: 0.5rem;"></div>
-                    <p id="manualCode" style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;"></p>
+                    <h3>Commission QR Code</h3>
+                    <p>Scan with your smart home app:</p>
+                    <div id="qrCodeContainer"></div>
+                    <p id="manualCode"></p>
                 </div>
+            </div>
 
+            <div class="card">
+                <h2>LED Configuration</h2>
                 <div class="config-grid">
                     <div class="config-row">
                         <div class="config-item">
@@ -302,15 +941,15 @@
                         <div class="config-item">
                             <label for="ledType">LED Type</label>
                             <select id="ledType">
-                                <option value="ws2812b">WS2812B (most common)</option>
+                                <option value="ws2812b">WS2812B</option>
                                 <option value="ws2811">WS2811</option>
                                 <option value="sk6812">SK6812 (RGBW)</option>
                             </select>
                         </div>
                         <div class="config-item">
-                            <label for="rgbOrder">RGB Order</label>
+                            <label for="rgbOrder">Color Order</label>
                             <select id="rgbOrder">
-                                <option value="grb">GRB (most WS2812B)</option>
+                                <option value="grb">GRB</option>
                                 <option value="rgb">RGB</option>
                                 <option value="bgr">BGR</option>
                                 <option value="rbg">RBG</option>
@@ -333,131 +972,140 @@
             <div class="card">
                 <h2>Serial Console</h2>
                 <div id="terminal" class="terminal"></div>
-                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-                    <input type="text" id="serialInput" placeholder="Type command and press Enter..."
-                           style="flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem; color: var(--text); font-family: monospace;">
-                    <button id="sendBtn" class="btn" style="width: auto; padding: 0.5rem 1rem;" disabled>Send</button>
+                <div class="serial-input-row">
+                    <input type="text" id="serialInput" placeholder="Enter command..." disabled>
+                    <button id="sendBtn" class="btn" disabled>Send</button>
                 </div>
-                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
-                    <button class="quick-cmd btn btn-secondary" data-cmd="help" disabled style="flex: 1; min-width: 60px; padding: 0.4rem;">help</button>
-                    <button class="quick-cmd btn btn-secondary" data-cmd="config" disabled style="flex: 1; min-width: 60px; padding: 0.4rem;">config</button>
-                    <button class="quick-cmd btn btn-secondary" data-cmd="reboot" disabled style="flex: 1; min-width: 60px; padding: 0.4rem;">reboot</button>
-                    <button class="quick-cmd btn btn-danger" data-cmd="factory" disabled style="flex: 1; min-width: 60px; padding: 0.4rem;">factory</button>
+                <div class="quick-cmds">
+                    <button class="quick-cmd" data-cmd="help" disabled>help</button>
+                    <button class="quick-cmd" data-cmd="config" disabled>config</button>
+                    <button class="quick-cmd" data-cmd="reboot" disabled>reboot</button>
+                    <button class="quick-cmd danger" data-cmd="factory" disabled>factory reset</button>
                 </div>
             </div>
         </div>
+
         <!-- Help Tab -->
         <div id="help" class="tab-content">
             <div class="card">
                 <h2>What is TLED?</h2>
-                <p class="info">TLED is a Matter-over-Thread LED controller for ESP32-C6. It lets you control addressable LED strips (WS2812B, SK6812, etc.) through your smart home using the Matter protocol over Thread networking.</p>
-                <p class="info" style="margin-top: 0.5rem;"><strong>Key features:</strong></p>
-                <ul style="color: var(--text-muted); font-size: 0.9rem; margin-left: 1.5rem; margin-top: 0.5rem;">
-                    <li>Works with Home Assistant, Apple Home, Google Home, and other Matter controllers</li>
-                    <li>Thread mesh networking - no WiFi needed, low power, self-healing network</li>
-                    <li>Full RGB color control with smooth transitions</li>
-                    <li>Configurable via USB serial - no recompiling needed</li>
-                </ul>
+                <div class="help-section">
+                    <p>TLED turns an ESP32-C6 into a smart LED controller using <strong>Matter over Thread</strong>. Control WS2812B, SK6812, and similar strips through Home Assistant, Apple Home, or Google Home.</p>
+                    <div class="features">
+                        <div class="feature">
+                            <span class="feature-icon">&#x1F310;</span>
+                            <div class="feature-text">
+                                <strong>Thread Mesh</strong>
+                                No WiFi needed, self-healing network
+                            </div>
+                        </div>
+                        <div class="feature">
+                            <span class="feature-icon">&#x1F3A8;</span>
+                            <div class="feature-text">
+                                <strong>Full RGB</strong>
+                                Smooth color transitions & effects
+                            </div>
+                        </div>
+                        <div class="feature">
+                            <span class="feature-icon">&#x1F50C;</span>
+                            <div class="feature-text">
+                                <strong>USB Config</strong>
+                                No recompiling needed
+                            </div>
+                        </div>
+                        <div class="feature">
+                            <span class="feature-icon">&#x1F3E0;</span>
+                            <div class="feature-text">
+                                <strong>Matter Native</strong>
+                                Works with all major platforms
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="card">
                 <h2>Requirements</h2>
-                <ul style="color: var(--text-muted); font-size: 0.9rem; margin-left: 1.5rem;">
-                    <li><strong>ESP32-C6 board</strong> - any board with USB-C (e.g., DFRobot Beetle ESP32-C6)</li>
-                    <li><strong>Addressable LED strip</strong> - WS2812B, WS2811, or SK6812</li>
-                    <li><strong>5V power supply</strong> - sized for your LED count (~60mA per LED at full white)</li>
-                    <li><strong>Thread border router</strong> - HomePod Mini, Apple TV 4K, or dedicated router like SLZB-06</li>
-                    <li><strong>Matter controller</strong> - Home Assistant with Matter integration, Apple Home, etc.</li>
-                </ul>
-            </div>
-
-            <div class="card">
-                <h2>Installation Steps</h2>
-                <ol style="color: var(--text-muted); font-size: 0.9rem; margin-left: 1.5rem;">
-                    <li><strong>Connect your ESP32-C6</strong> via USB to your computer</li>
-                    <li><strong>Click "Install TLED Firmware"</strong> in the Install tab</li>
-                    <li>If prompted, <strong>hold the BOOT button</strong> while clicking Install</li>
-                    <li>Wait for the flash to complete</li>
-                    <li>Go to the <strong>Configure tab</strong> and connect to the device</li>
-                    <li>Set your <strong>LED count, GPIO pin</strong>, and other settings</li>
-                    <li>Click <strong>Save & Reboot</strong></li>
-                    <li>Scan the <strong>QR code</strong> with your smart home app to commission</li>
-                </ol>
+                <div class="help-section">
+                    <ul>
+                        <li><strong>ESP32-C6 board</strong> with USB-C (e.g., DFRobot Beetle)</li>
+                        <li><strong>Addressable LEDs</strong> - WS2812B, WS2811, or SK6812</li>
+                        <li><strong>5V power supply</strong> - ~60mA per LED at full white</li>
+                        <li><strong>Thread border router</strong> - HomePod Mini, Apple TV 4K, or SLZB-06</li>
+                        <li><strong>Matter controller</strong> - Home Assistant, Apple Home, Google Home</li>
+                    </ul>
+                </div>
             </div>
 
             <div class="card">
                 <h2>Configuration Options</h2>
-                <div style="color: var(--text-muted); font-size: 0.9rem;">
-                    <p><strong>Number of LEDs</strong> - How many LEDs in your strip (1-1000)</p>
-                    <p style="margin-top: 0.5rem;"><strong>GPIO Pin</strong> - Data pin connected to your LED strip. Common choices:</p>
-                    <ul style="margin-left: 1.5rem; margin-top: 0.25rem;">
-                        <li>GPIO 5 (default) - works on most ESP32-C6 boards</li>
-                        <li>Check your board's pinout for available GPIOs</li>
+                <div class="help-section">
+                    <p><strong>Number of LEDs</strong> - Total LEDs in your strip (1-1000)</p>
+                    <p><strong>GPIO Pin</strong> - Data pin for the LED strip. GPIO 5 works on most ESP32-C6 boards.</p>
+                    <p><strong>LED Type</strong></p>
+                    <ul>
+                        <li><code>WS2812B</code> - Most common, 800kHz</li>
+                        <li><code>WS2811</code> - Older, 400kHz</li>
+                        <li><code>SK6812</code> - Similar to WS2812B, some have RGBW</li>
                     </ul>
-                    <p style="margin-top: 0.5rem;"><strong>LED Type</strong></p>
-                    <ul style="margin-left: 1.5rem; margin-top: 0.25rem;">
-                        <li><strong>WS2812B</strong> - Most common, 800kHz, GRB order</li>
-                        <li><strong>WS2811</strong> - Older, 400kHz, often RGB order</li>
-                        <li><strong>SK6812</strong> - Similar to WS2812B, some have RGBW</li>
+                    <p><strong>Color Order</strong> - If colors look wrong, try different orders:</p>
+                    <ul>
+                        <li><code>GRB</code> - Most WS2812B strips</li>
+                        <li><code>RGB</code> - Some WS2811 and older strips</li>
+                        <li><code>BGR</code> / <code>RBG</code> - Less common</li>
                     </ul>
-                    <p style="margin-top: 0.5rem;"><strong>RGB Order</strong> - Color byte order. If colors look wrong, try a different order:</p>
-                    <ul style="margin-left: 1.5rem; margin-top: 0.25rem;">
-                        <li><strong>GRB</strong> - Most WS2812B strips</li>
-                        <li><strong>RGB</strong> - Some WS2811 and older strips</li>
-                        <li><strong>BGR/RBG</strong> - Less common, try if colors are swapped</li>
-                    </ul>
-                    <p style="margin-top: 0.5rem;"><strong>Max Brightness</strong> - Limits maximum brightness (1-255). Lower values save power and reduce heat.</p>
+                    <p><strong>Max Brightness</strong> - Limits power consumption and heat (1-255)</p>
                 </div>
             </div>
 
             <div class="card">
                 <h2>Serial Commands</h2>
-                <div style="color: var(--text-muted); font-size: 0.9rem; font-family: monospace;">
-                    <p><strong>help</strong> - Show available commands</p>
-                    <p><strong>config</strong> - Show current configuration</p>
-                    <p><strong>set leds &lt;n&gt;</strong> - Set number of LEDs</p>
-                    <p><strong>set gpio &lt;n&gt;</strong> - Set GPIO pin</p>
-                    <p><strong>set type &lt;ws2812b|ws2811|sk6812&gt;</strong> - Set LED type</p>
-                    <p><strong>set order &lt;grb|rgb|bgr|rbg&gt;</strong> - Set RGB order</p>
-                    <p><strong>set brightness &lt;1-255&gt;</strong> - Set max brightness</p>
-                    <p><strong>save</strong> - Save configuration to flash</p>
-                    <p><strong>reboot</strong> - Restart the device</p>
-                    <p><strong>factory</strong> - Factory reset (erases all settings and commissioning)</p>
+                <div class="help-section cmd-list">
+                    <p><strong>help</strong> <span>Show available commands</span></p>
+                    <p><strong>config</strong> <span>Show current settings</span></p>
+                    <p><strong>set leds &lt;n&gt;</strong> <span>Set LED count</span></p>
+                    <p><strong>set gpio &lt;n&gt;</strong> <span>Set data pin</span></p>
+                    <p><strong>set type &lt;type&gt;</strong> <span>ws2812b, ws2811, sk6812</span></p>
+                    <p><strong>set order &lt;order&gt;</strong> <span>grb, rgb, bgr, rbg</span></p>
+                    <p><strong>set brightness &lt;n&gt;</strong> <span>Max brightness 1-255</span></p>
+                    <p><strong>save</strong> <span>Save config to flash</span></p>
+                    <p><strong>reboot</strong> <span>Restart device</span></p>
+                    <p><strong>factory</strong> <span>Erase all settings</span></p>
                 </div>
             </div>
 
             <div class="card">
                 <h2>Troubleshooting</h2>
-                <div style="color: var(--text-muted); font-size: 0.9rem;">
-                    <p><strong>Can't flash / "No port selected"</strong></p>
-                    <ul style="margin-left: 1.5rem; margin-bottom: 0.5rem;">
-                        <li>Make sure you're using Chrome or Edge (Firefox doesn't support Web Serial)</li>
-                        <li>Try holding the BOOT button while clicking Install</li>
-                        <li>Check USB cable - some cables are charge-only without data lines</li>
+                <div class="help-section">
+                    <p><strong>Can't flash / No port selected</strong></p>
+                    <ul>
+                        <li>Use Chrome or Edge (Firefox doesn't support Web Serial)</li>
+                        <li>Hold BOOT button while clicking Install</li>
+                        <li>Try a different USB cable (some are charge-only)</li>
                     </ul>
 
-                    <p><strong>Device boot loops / "No bootable app partitions"</strong></p>
-                    <ul style="margin-left: 1.5rem; margin-bottom: 0.5rem;">
-                        <li>Flash failed mid-way. Try flashing again with a fresh install.</li>
+                    <p><strong>Device boot loops</strong></p>
+                    <ul>
+                        <li>Flash failed mid-way - try flashing again</li>
                     </ul>
 
                     <p><strong>Can't find device during commissioning</strong></p>
-                    <ul style="margin-left: 1.5rem; margin-bottom: 0.5rem;">
-                        <li>Commission within 30 seconds of boot (BLE advertising slows down after that)</li>
-                        <li>If it says "Fabric already commissioned", run <strong>factory</strong> command</li>
-                        <li>Make sure your Thread border router is nearby and working</li>
+                    <ul>
+                        <li>Commission within 30s of boot (BLE advertising slows after)</li>
+                        <li>If "Fabric already commissioned", run <code>factory</code> command</li>
+                        <li>Ensure Thread border router is nearby</li>
                     </ul>
 
-                    <p><strong>Wrong colors on LED strip</strong></p>
-                    <ul style="margin-left: 1.5rem; margin-bottom: 0.5rem;">
-                        <li>Try different RGB Order settings (GRB, RGB, BGR, RBG)</li>
+                    <p><strong>Wrong colors</strong></p>
+                    <ul>
+                        <li>Try different Color Order settings</li>
                     </ul>
 
                     <p><strong>LEDs don't light up</strong></p>
-                    <ul style="margin-left: 1.5rem;">
-                        <li>Check power supply - LEDs need 5V, not 3.3V</li>
-                        <li>Verify GPIO pin matches your wiring</li>
-                        <li>Make sure LED count is correct</li>
+                    <ul>
+                        <li>Check power - LEDs need 5V, not 3.3V</li>
+                        <li>Verify GPIO pin matches wiring</li>
+                        <li>Confirm LED count is correct</li>
                     </ul>
                 </div>
             </div>
@@ -465,7 +1113,7 @@
     </div>
 
     <footer>
-        <p>TLED is open source &bull; <a href="https://github.com/maui1911/TLED" target="_blank">View on GitHub</a></p>
+        <p>TLED is open source &middot; <a href="https://github.com/maui1911/TLED" target="_blank">GitHub</a></p>
     </footer>
 
     <script>
@@ -495,7 +1143,7 @@
         const manualCode = document.getElementById('manualCode');
         const serialInput = document.getElementById('serialInput');
         const sendBtn = document.getElementById('sendBtn');
-        let serialBuffer = '';  // Buffer for detecting patterns across chunks
+        let serialBuffer = '';
 
         function log(text, type = 'response') {
             const span = document.createElement('span');
@@ -508,7 +1156,7 @@
         function updateStatus(connected) {
             connectionStatus.className = 'status ' + (connected ? 'connected' : 'disconnected');
             connectionStatus.innerHTML = `<span class="status-dot"></span><span>${connected ? 'Connected' : 'Not connected'}</span>`;
-            connectBtn.textContent = connected ? 'Disconnect' : 'Connect to Device';
+            connectBtn.textContent = connected ? 'Disconnect' : 'Connect';
             saveBtn.disabled = !connected;
             saveRebootBtn.disabled = !connected;
             rebootBtn.disabled = !connected;
@@ -518,20 +1166,17 @@
         }
 
         function checkForQRCode(text) {
-            // Add to buffer and keep last 2000 chars
             serialBuffer += text;
             if (serialBuffer.length > 2000) {
                 serialBuffer = serialBuffer.slice(-2000);
             }
 
-            // Look for Matter SetupQRCode pattern (e.g., MT:Y.K9042C00KA0648G00)
             const qrMatch = serialBuffer.match(/SetupQRCode:\s*\[([^\]]+)\]/);
             if (qrMatch && !qrCard.classList.contains('visible')) {
                 const qrData = qrMatch[1];
                 generateQRCode(qrData);
             }
 
-            // Look for manual pairing code
             const manualMatch = serialBuffer.match(/Manual pairing code:\s*\[(\d+)\]/);
             if (manualMatch) {
                 manualCode.textContent = `Manual code: ${manualMatch[1]}`;
@@ -543,8 +1188,8 @@
             try {
                 new QRCode(qrCodeContainer, {
                     text: data,
-                    width: 200,
-                    height: 200,
+                    width: 180,
+                    height: 180,
                     colorDark: '#000000',
                     colorLight: '#ffffff',
                     correctLevel: QRCode.CorrectLevel.M
@@ -571,10 +1216,8 @@
                 updateStatus(true);
                 log('Connected to device\n', 'prompt');
 
-                // Send config command to get current settings
                 await sendCommand('config');
 
-                // Read loop
                 while (true) {
                     const { value, done } = await reader.read();
                     if (done) break;
@@ -620,7 +1263,6 @@
         }
 
         function parseConfig(text) {
-            // Parse config output and update form fields
             const lines = text.split('\n');
             for (const line of lines) {
                 const match = line.match(/^\s*(\w+)\s*=\s*(.+)$/);
@@ -677,7 +1319,6 @@
 
         rebootBtn.addEventListener('click', async () => {
             await sendCommand('reboot');
-            // Clear QR card and buffer as it will be re-detected on reboot
             qrCard.classList.remove('visible');
             qrCodeContainer.innerHTML = '';
             manualCode.textContent = '';
@@ -710,7 +1351,6 @@
             serialBuffer = '';
         });
 
-        // Quick command buttons
         document.querySelectorAll('.quick-cmd').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const cmd = btn.dataset.cmd;
@@ -729,7 +1369,6 @@
             });
         });
 
-        // Serial input handling
         sendBtn.addEventListener('click', async () => {
             const cmd = serialInput.value.trim();
             if (cmd) {
@@ -748,21 +1387,17 @@
             }
         });
 
-        // Check for Web Serial support
         if (!('serial' in navigator)) {
             connectBtn.textContent = 'Web Serial not supported';
             connectBtn.disabled = true;
         }
 
-        // Handle ESP Web Tools install button states
         const installButton = document.querySelector('esp-web-install-button');
         if (installButton) {
-            // Listen for state changes
             installButton.addEventListener('state-changed', (e) => {
                 console.log('ESP Web Tools state:', e.detail);
             });
 
-            // Handle errors - the dialog can get stuck, so offer to reload
             installButton.addEventListener('error', (e) => {
                 console.error('ESP Web Tools error:', e.detail);
                 setTimeout(() => {
