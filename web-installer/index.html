@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TLED - Matter-over-Thread LED Controller</title>
     <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
         :root {
             --primary: #6366f1;
@@ -154,6 +155,44 @@
         .terminal .prompt { color: #22c55e; }
         .terminal .response { color: #94a3b8; }
         .terminal .error { color: #ef4444; }
+        .terminal .qr-link { color: #60a5fa; text-decoration: underline; cursor: pointer; }
+
+        .qr-card {
+            background: linear-gradient(135deg, #1e3a5f, #1e293b);
+            border: 2px solid #3b82f6;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            display: none;
+        }
+
+        .qr-card.visible { display: block; }
+
+        .qr-card h3 { color: #60a5fa; margin-bottom: 0.5rem; font-size: 1rem; }
+
+        .qr-card a {
+            color: #93c5fd;
+            word-break: break-all;
+            font-size: 0.85rem;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .btn-row .btn { flex: 1; }
+
+        .btn-secondary {
+            background: var(--surface);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover { background: var(--border); }
+
+        .btn-danger { background: #dc2626; }
+        .btn-danger:hover { background: #b91c1c; }
 
         .status {
             display: flex;
@@ -202,6 +241,7 @@
         <div class="tabs">
             <div class="tab active" data-tab="install">1. Install</div>
             <div class="tab" data-tab="configure">2. Configure</div>
+            <div class="tab" data-tab="help">Help</div>
         </div>
 
         <!-- Install Tab -->
@@ -234,7 +274,17 @@
                     <span>Not connected</span>
                 </div>
 
-                <button id="connectBtn" class="btn" style="margin-bottom: 1rem;">Connect to Device</button>
+                <div class="btn-row">
+                    <button id="connectBtn" class="btn">Connect to Device</button>
+                    <button id="rebootBtn" class="btn btn-secondary" disabled>Reboot</button>
+                </div>
+
+                <div id="qrCard" class="qr-card">
+                    <h3>📱 Commission QR Code</h3>
+                    <p style="margin-bottom: 0.5rem; color: var(--text-muted); font-size: 0.85rem;">Scan this with your Home Assistant or Apple Home app:</p>
+                    <div id="qrCodeContainer" style="background: white; padding: 1rem; border-radius: 8px; display: inline-block; margin-bottom: 0.5rem;"></div>
+                    <p id="manualCode" style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;"></p>
+                </div>
 
                 <div class="config-grid">
                     <div class="config-row">
@@ -273,20 +323,149 @@
                         <input type="number" id="maxBrightness" min="1" max="255" value="255">
                     </div>
 
-                    <button id="saveBtn" class="btn btn-success" disabled>Save Configuration</button>
+                    <div class="btn-row">
+                        <button id="saveBtn" class="btn btn-success" disabled>Save</button>
+                        <button id="saveRebootBtn" class="btn btn-success" disabled>Save & Reboot</button>
+                    </div>
                 </div>
             </div>
 
             <div class="card">
                 <h2>Serial Console</h2>
                 <div id="terminal" class="terminal"></div>
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                    <input type="text" id="serialInput" placeholder="Type command and press Enter..."
+                           style="flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem; color: var(--text); font-family: monospace;">
+                    <button id="sendBtn" class="btn" style="width: auto; padding: 0.5rem 1rem;" disabled>Send</button>
+                </div>
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+                    <button class="quick-cmd btn btn-secondary" data-cmd="help" disabled style="flex: 1; min-width: 60px; padding: 0.4rem;">help</button>
+                    <button class="quick-cmd btn btn-secondary" data-cmd="config" disabled style="flex: 1; min-width: 60px; padding: 0.4rem;">config</button>
+                    <button class="quick-cmd btn btn-secondary" data-cmd="reboot" disabled style="flex: 1; min-width: 60px; padding: 0.4rem;">reboot</button>
+                    <button class="quick-cmd btn btn-danger" data-cmd="factory" disabled style="flex: 1; min-width: 60px; padding: 0.4rem;">factory</button>
+                </div>
+            </div>
+        </div>
+        <!-- Help Tab -->
+        <div id="help" class="tab-content">
+            <div class="card">
+                <h2>What is TLED?</h2>
+                <p class="info">TLED is a Matter-over-Thread LED controller for ESP32-C6. It lets you control addressable LED strips (WS2812B, SK6812, etc.) through your smart home using the Matter protocol over Thread networking.</p>
+                <p class="info" style="margin-top: 0.5rem;"><strong>Key features:</strong></p>
+                <ul style="color: var(--text-muted); font-size: 0.9rem; margin-left: 1.5rem; margin-top: 0.5rem;">
+                    <li>Works with Home Assistant, Apple Home, Google Home, and other Matter controllers</li>
+                    <li>Thread mesh networking - no WiFi needed, low power, self-healing network</li>
+                    <li>Full RGB color control with smooth transitions</li>
+                    <li>Configurable via USB serial - no recompiling needed</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h2>Requirements</h2>
+                <ul style="color: var(--text-muted); font-size: 0.9rem; margin-left: 1.5rem;">
+                    <li><strong>ESP32-C6 board</strong> - any board with USB-C (e.g., DFRobot Beetle ESP32-C6)</li>
+                    <li><strong>Addressable LED strip</strong> - WS2812B, WS2811, or SK6812</li>
+                    <li><strong>5V power supply</strong> - sized for your LED count (~60mA per LED at full white)</li>
+                    <li><strong>Thread border router</strong> - HomePod Mini, Apple TV 4K, or dedicated router like SLZB-06</li>
+                    <li><strong>Matter controller</strong> - Home Assistant with Matter integration, Apple Home, etc.</li>
+                </ul>
+            </div>
+
+            <div class="card">
+                <h2>Installation Steps</h2>
+                <ol style="color: var(--text-muted); font-size: 0.9rem; margin-left: 1.5rem;">
+                    <li><strong>Connect your ESP32-C6</strong> via USB to your computer</li>
+                    <li><strong>Click "Install TLED Firmware"</strong> in the Install tab</li>
+                    <li>If prompted, <strong>hold the BOOT button</strong> while clicking Install</li>
+                    <li>Wait for the flash to complete</li>
+                    <li>Go to the <strong>Configure tab</strong> and connect to the device</li>
+                    <li>Set your <strong>LED count, GPIO pin</strong>, and other settings</li>
+                    <li>Click <strong>Save & Reboot</strong></li>
+                    <li>Scan the <strong>QR code</strong> with your smart home app to commission</li>
+                </ol>
+            </div>
+
+            <div class="card">
+                <h2>Configuration Options</h2>
+                <div style="color: var(--text-muted); font-size: 0.9rem;">
+                    <p><strong>Number of LEDs</strong> - How many LEDs in your strip (1-1000)</p>
+                    <p style="margin-top: 0.5rem;"><strong>GPIO Pin</strong> - Data pin connected to your LED strip. Common choices:</p>
+                    <ul style="margin-left: 1.5rem; margin-top: 0.25rem;">
+                        <li>GPIO 5 (default) - works on most ESP32-C6 boards</li>
+                        <li>Check your board's pinout for available GPIOs</li>
+                    </ul>
+                    <p style="margin-top: 0.5rem;"><strong>LED Type</strong></p>
+                    <ul style="margin-left: 1.5rem; margin-top: 0.25rem;">
+                        <li><strong>WS2812B</strong> - Most common, 800kHz, GRB order</li>
+                        <li><strong>WS2811</strong> - Older, 400kHz, often RGB order</li>
+                        <li><strong>SK6812</strong> - Similar to WS2812B, some have RGBW</li>
+                    </ul>
+                    <p style="margin-top: 0.5rem;"><strong>RGB Order</strong> - Color byte order. If colors look wrong, try a different order:</p>
+                    <ul style="margin-left: 1.5rem; margin-top: 0.25rem;">
+                        <li><strong>GRB</strong> - Most WS2812B strips</li>
+                        <li><strong>RGB</strong> - Some WS2811 and older strips</li>
+                        <li><strong>BGR/RBG</strong> - Less common, try if colors are swapped</li>
+                    </ul>
+                    <p style="margin-top: 0.5rem;"><strong>Max Brightness</strong> - Limits maximum brightness (1-255). Lower values save power and reduce heat.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Serial Commands</h2>
+                <div style="color: var(--text-muted); font-size: 0.9rem; font-family: monospace;">
+                    <p><strong>help</strong> - Show available commands</p>
+                    <p><strong>config</strong> - Show current configuration</p>
+                    <p><strong>set leds &lt;n&gt;</strong> - Set number of LEDs</p>
+                    <p><strong>set gpio &lt;n&gt;</strong> - Set GPIO pin</p>
+                    <p><strong>set type &lt;ws2812b|ws2811|sk6812&gt;</strong> - Set LED type</p>
+                    <p><strong>set order &lt;grb|rgb|bgr|rbg&gt;</strong> - Set RGB order</p>
+                    <p><strong>set brightness &lt;1-255&gt;</strong> - Set max brightness</p>
+                    <p><strong>save</strong> - Save configuration to flash</p>
+                    <p><strong>reboot</strong> - Restart the device</p>
+                    <p><strong>factory</strong> - Factory reset (erases all settings and commissioning)</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Troubleshooting</h2>
+                <div style="color: var(--text-muted); font-size: 0.9rem;">
+                    <p><strong>Can't flash / "No port selected"</strong></p>
+                    <ul style="margin-left: 1.5rem; margin-bottom: 0.5rem;">
+                        <li>Make sure you're using Chrome or Edge (Firefox doesn't support Web Serial)</li>
+                        <li>Try holding the BOOT button while clicking Install</li>
+                        <li>Check USB cable - some cables are charge-only without data lines</li>
+                    </ul>
+
+                    <p><strong>Device boot loops / "No bootable app partitions"</strong></p>
+                    <ul style="margin-left: 1.5rem; margin-bottom: 0.5rem;">
+                        <li>Flash failed mid-way. Try flashing again with a fresh install.</li>
+                    </ul>
+
+                    <p><strong>Can't find device during commissioning</strong></p>
+                    <ul style="margin-left: 1.5rem; margin-bottom: 0.5rem;">
+                        <li>Commission within 30 seconds of boot (BLE advertising slows down after that)</li>
+                        <li>If it says "Fabric already commissioned", run <strong>factory</strong> command</li>
+                        <li>Make sure your Thread border router is nearby and working</li>
+                    </ul>
+
+                    <p><strong>Wrong colors on LED strip</strong></p>
+                    <ul style="margin-left: 1.5rem; margin-bottom: 0.5rem;">
+                        <li>Try different RGB Order settings (GRB, RGB, BGR, RBG)</li>
+                    </ul>
+
+                    <p><strong>LEDs don't light up</strong></p>
+                    <ul style="margin-left: 1.5rem;">
+                        <li>Check power supply - LEDs need 5V, not 3.3V</li>
+                        <li>Verify GPIO pin matches your wiring</li>
+                        <li>Make sure LED count is correct</li>
+                    </ul>
+                </div>
             </div>
         </div>
     </div>
 
     <footer>
         <p>TLED is open source &bull; <a href="https://github.com/maui1911/TLED" target="_blank">View on GitHub</a></p>
-        <p style="margin-top: 0.5rem;">Like WLED, but for Thread</p>
     </footer>
 
     <script>
@@ -307,8 +486,16 @@
 
         const connectBtn = document.getElementById('connectBtn');
         const saveBtn = document.getElementById('saveBtn');
+        const saveRebootBtn = document.getElementById('saveRebootBtn');
+        const rebootBtn = document.getElementById('rebootBtn');
         const terminal = document.getElementById('terminal');
         const connectionStatus = document.getElementById('connectionStatus');
+        const qrCard = document.getElementById('qrCard');
+        const qrCodeContainer = document.getElementById('qrCodeContainer');
+        const manualCode = document.getElementById('manualCode');
+        const serialInput = document.getElementById('serialInput');
+        const sendBtn = document.getElementById('sendBtn');
+        let serialBuffer = '';  // Buffer for detecting patterns across chunks
 
         function log(text, type = 'response') {
             const span = document.createElement('span');
@@ -323,6 +510,49 @@
             connectionStatus.innerHTML = `<span class="status-dot"></span><span>${connected ? 'Connected' : 'Not connected'}</span>`;
             connectBtn.textContent = connected ? 'Disconnect' : 'Connect to Device';
             saveBtn.disabled = !connected;
+            saveRebootBtn.disabled = !connected;
+            rebootBtn.disabled = !connected;
+            sendBtn.disabled = !connected;
+            serialInput.disabled = !connected;
+            document.querySelectorAll('.quick-cmd').forEach(btn => btn.disabled = !connected);
+        }
+
+        function checkForQRCode(text) {
+            // Add to buffer and keep last 2000 chars
+            serialBuffer += text;
+            if (serialBuffer.length > 2000) {
+                serialBuffer = serialBuffer.slice(-2000);
+            }
+
+            // Look for Matter SetupQRCode pattern (e.g., MT:Y.K9042C00KA0648G00)
+            const qrMatch = serialBuffer.match(/SetupQRCode:\s*\[([^\]]+)\]/);
+            if (qrMatch && !qrCard.classList.contains('visible')) {
+                const qrData = qrMatch[1];
+                generateQRCode(qrData);
+            }
+
+            // Look for manual pairing code
+            const manualMatch = serialBuffer.match(/Manual pairing code:\s*\[(\d+)\]/);
+            if (manualMatch) {
+                manualCode.textContent = `Manual code: ${manualMatch[1]}`;
+            }
+        }
+
+        function generateQRCode(data) {
+            qrCodeContainer.innerHTML = '';
+            try {
+                new QRCode(qrCodeContainer, {
+                    text: data,
+                    width: 200,
+                    height: 200,
+                    colorDark: '#000000',
+                    colorLight: '#ffffff',
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+                qrCard.classList.add('visible');
+            } catch (err) {
+                console.error('QR code generation failed:', err);
+            }
         }
 
         async function connect() {
@@ -350,7 +580,12 @@
                     if (done) break;
                     if (value) {
                         log(value);
-                        parseConfig(value);
+                        try {
+                            parseConfig(value);
+                            checkForQRCode(value);
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                        }
                     }
                 }
             } catch (e) {
@@ -374,6 +609,7 @@
             }
             updateStatus(false);
             log('Disconnected\n', 'prompt');
+            serialBuffer = '';
         }
 
         async function sendCommand(cmd) {
@@ -439,10 +675,102 @@
             await sendCommand('save');
         });
 
+        rebootBtn.addEventListener('click', async () => {
+            await sendCommand('reboot');
+            // Clear QR card and buffer as it will be re-detected on reboot
+            qrCard.classList.remove('visible');
+            qrCodeContainer.innerHTML = '';
+            manualCode.textContent = '';
+            serialBuffer = '';
+        });
+
+        saveRebootBtn.addEventListener('click', async () => {
+            const numLeds = document.getElementById('numLeds').value;
+            const gpioPin = document.getElementById('gpioPin').value;
+            const ledType = document.getElementById('ledType').value;
+            const rgbOrder = document.getElementById('rgbOrder').value;
+            const maxBrightness = document.getElementById('maxBrightness').value;
+
+            await sendCommand(`set leds ${numLeds}`);
+            await new Promise(r => setTimeout(r, 100));
+            await sendCommand(`set gpio ${gpioPin}`);
+            await new Promise(r => setTimeout(r, 100));
+            await sendCommand(`set type ${ledType}`);
+            await new Promise(r => setTimeout(r, 100));
+            await sendCommand(`set order ${rgbOrder}`);
+            await new Promise(r => setTimeout(r, 100));
+            await sendCommand(`set brightness ${maxBrightness}`);
+            await new Promise(r => setTimeout(r, 100));
+            await sendCommand('save');
+            await new Promise(r => setTimeout(r, 200));
+            await sendCommand('reboot');
+            qrCard.classList.remove('visible');
+            qrCodeContainer.innerHTML = '';
+            manualCode.textContent = '';
+            serialBuffer = '';
+        });
+
+        // Quick command buttons
+        document.querySelectorAll('.quick-cmd').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const cmd = btn.dataset.cmd;
+                if (cmd === 'factory') {
+                    if (!confirm('Factory reset will erase all settings and commissioning data. Continue?')) {
+                        return;
+                    }
+                }
+                await sendCommand(cmd);
+                if (cmd === 'reboot' || cmd === 'factory') {
+                    qrCard.classList.remove('visible');
+                    qrCodeContainer.innerHTML = '';
+                    manualCode.textContent = '';
+                    serialBuffer = '';
+                }
+            });
+        });
+
+        // Serial input handling
+        sendBtn.addEventListener('click', async () => {
+            const cmd = serialInput.value.trim();
+            if (cmd) {
+                await sendCommand(cmd);
+                serialInput.value = '';
+            }
+        });
+
+        serialInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter' && !sendBtn.disabled) {
+                const cmd = serialInput.value.trim();
+                if (cmd) {
+                    await sendCommand(cmd);
+                    serialInput.value = '';
+                }
+            }
+        });
+
         // Check for Web Serial support
         if (!('serial' in navigator)) {
             connectBtn.textContent = 'Web Serial not supported';
             connectBtn.disabled = true;
+        }
+
+        // Handle ESP Web Tools install button states
+        const installButton = document.querySelector('esp-web-install-button');
+        if (installButton) {
+            // Listen for state changes
+            installButton.addEventListener('state-changed', (e) => {
+                console.log('ESP Web Tools state:', e.detail);
+            });
+
+            // Handle errors - the dialog can get stuck, so offer to reload
+            installButton.addEventListener('error', (e) => {
+                console.error('ESP Web Tools error:', e.detail);
+                setTimeout(() => {
+                    if (confirm('Flash failed. Reload page to try again?')) {
+                        location.reload();
+                    }
+                }, 500);
+            });
         }
     </script>
 </body>

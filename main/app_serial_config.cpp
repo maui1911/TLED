@@ -15,6 +15,7 @@
 #include "driver/usb_serial_jtag.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include <esp_matter.h>
 
 static const char *TAG = "serial_config";
 
@@ -143,16 +144,13 @@ static void process_command(const char *cmd) {
         esp_restart();
     }
     else if (strcmp(command, "factory") == 0) {
-        serial_write("Resetting to factory defaults...\r\n");
+        serial_write("Resetting to factory defaults (including Matter fabric)...\r\n");
         tled_config_reset();
-        esp_err_t err = tled_config_save();
-        if (err == ESP_OK) {
-            serial_write("Factory reset complete. Rebooting...\r\n");
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            esp_restart();
-        } else {
-            serial_printf("Error: %s\r\n", esp_err_to_name(err));
-        }
+        tled_config_save();
+        serial_write("Clearing Matter commissioning data...\r\n");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        // This clears fabric data and reboots
+        esp_matter::factory_reset();
     }
     else {
         serial_printf("Unknown command: %s\r\n", command);

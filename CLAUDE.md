@@ -179,11 +179,13 @@ The web installer uses ESP Web Tools to flash firmware directly from a browser.
 # Build the firmware first
 idf.py build
 
-# Copy firmware files
+# Copy firmware files to web-installer
 ./web-installer/copy-firmware.sh
 
-# Serve locally (UI only - Web Serial needs HTTPS)
+# Start local dev server (runs on http://localhost:8080)
 ./web-installer/serve-local.sh
+
+# Note: Web Serial API requires HTTPS - use a reverse proxy (e.g., Caddy) to localhost:8080
 ```
 
 ### Kconfig Options

@@ -61,6 +61,9 @@ CONFIG_BUTTON_LONG_PRESS_TIME_MS=5000
 # Enable Matter shell for debugging
 CONFIG_ENABLE_CHIP_SHELL=y
 
+# Use custom device instance info provider (for TLED branding)
+CONFIG_CUSTOM_DEVICE_INSTANCE_INFO_PROVIDER=y
+
 # BSP Configuration for DFRobot Beetle ESP32-C6
 # Button (Boot button on GPIO9)
 CONFIG_BSP_BUTTONS_NUM=1

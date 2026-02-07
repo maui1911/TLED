@@ -24,6 +24,13 @@ else
     echo "  ! partition-table.bin not found"
 fi
 
+if [ -f "$BUILD_DIR/ota_data_initial.bin" ]; then
+    cp "$BUILD_DIR/ota_data_initial.bin" "$SCRIPT_DIR/firmware/"
+    echo "  - ota_data_initial.bin"
+else
+    echo "  ! ota_data_initial.bin not found"
+fi
+
 if [ -f "$BUILD_DIR/tled.bin" ]; then
     cp "$BUILD_DIR/tled.bin" "$SCRIPT_DIR/firmware/"
     echo "  - tled.bin"

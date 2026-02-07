@@ -21,6 +21,7 @@
 #include "app_nvs_config.h"
 #include "app_ble_config.h"
 #include "app_serial_config.h"
+#include "app_device_info.h"
 #include <app_reset.h>
 
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
@@ -33,7 +34,7 @@
 
 // Version string from CMakeLists.txt
 #ifndef PROJECT_VER
-#define PROJECT_VER "0.2.0"
+#define PROJECT_VER "0.5.0"
 #endif
 
 static const char *TAG = "tled_main";
@@ -235,6 +236,10 @@ extern "C" void app_main()
     app_driver_handle_t button_handle = app_driver_button_init();
     ABORT_APP_ON_FAILURE(button_handle != NULL, ESP_LOGE(TAG, "Failed to initialize button driver"));
     app_reset_button_register(button_handle);
+
+    /* Set custom device info provider BEFORE creating Matter node */
+    /* This must be done before node::create() so BasicInformation cluster gets our values */
+    tled::set_device_info_provider();
 
     /* Create a Matter node and add the mandatory Root Node device type on endpoint 0 */
     node::config_t node_config;
