@@ -365,7 +365,8 @@ esp_err_t tled_ble_config_start(uint32_t timeout_ms)
     s_staged_rgb_order = cfg->rgb_order;
     s_staged_chipset = cfg->chipset;
     s_staged_max_bri = cfg->max_brightness;
-    strncpy(s_staged_dev_name, cfg->device_name, sizeof(s_staged_dev_name));
+    strncpy(s_staged_dev_name, cfg->device_name, sizeof(s_staged_dev_name) - 1);
+    s_staged_dev_name[sizeof(s_staged_dev_name) - 1] = '\0';
 
     s_config_saved = false;
     s_connected = false;

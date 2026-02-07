@@ -167,7 +167,7 @@ static void print_help(void) {
     serial_write("  set gpio <n>      - Set data GPIO pin (0-21)\r\n");
     serial_write("  set brightness <n> - Set max brightness (1-255)\r\n");
     serial_write("  set type <t>      - Set LED type: ws2812b, ws2811, sk6812\r\n");
-    serial_write("  set order <o>     - Set RGB order: grb, rgb, bgr, rbg, grbw\r\n");
+    serial_write("  set order <o>     - Set RGB order: grb, rgb, brg, rbg, bgr, gbr\r\n");
     serial_write("  set name <name>   - Set device name\r\n");
     serial_write("  set poweron <m>   - Power-on behavior: restore, on, off\r\n");
     serial_write("  save              - Save config and reboot\r\n");
@@ -188,11 +188,12 @@ static void print_config(void) {
 
     const char *order_str = "unknown";
     switch (cfg->rgb_order) {
-        case 0: order_str = "grb"; break;
-        case 1: order_str = "rgb"; break;
-        case 2: order_str = "bgr"; break;
-        case 3: order_str = "rbg"; break;
-        case 4: order_str = "grbw"; break;
+        case RGB_ORDER_GRB: order_str = "grb"; break;
+        case RGB_ORDER_RGB: order_str = "rgb"; break;
+        case RGB_ORDER_BRG: order_str = "brg"; break;
+        case RGB_ORDER_RBG: order_str = "rbg"; break;
+        case RGB_ORDER_BGR: order_str = "bgr"; break;
+        case RGB_ORDER_GBR: order_str = "gbr"; break;
     }
 
     const char *poweron_str = "unknown";
@@ -227,11 +228,11 @@ static void handle_set_command(const char *param, const char *value) {
     }
     else if (strcmp(param, "gpio") == 0) {
         int n = atoi(value);
-        if (n >= 0 && n <= 21) {
+        if (tled_config_validate_gpio((uint8_t)n)) {
             cfg->gpio_pin = n;
             serial_printf("Set gpio = %d\r\n", n);
         } else {
-            serial_write("Error: gpio must be 0-21\r\n");
+            serial_write("Error: invalid GPIO pin (avoid 9, 12-13, 15)\r\n");
         }
     }
     else if (strcmp(param, "brightness") == 0) {
@@ -259,22 +260,25 @@ static void handle_set_command(const char *param, const char *value) {
     }
     else if (strcmp(param, "order") == 0) {
         if (strcmp(value, "grb") == 0) {
-            cfg->rgb_order = 0;
+            cfg->rgb_order = RGB_ORDER_GRB;
             serial_write("Set order = grb\r\n");
         } else if (strcmp(value, "rgb") == 0) {
-            cfg->rgb_order = 1;
+            cfg->rgb_order = RGB_ORDER_RGB;
             serial_write("Set order = rgb\r\n");
-        } else if (strcmp(value, "bgr") == 0) {
-            cfg->rgb_order = 2;
-            serial_write("Set order = bgr\r\n");
+        } else if (strcmp(value, "brg") == 0) {
+            cfg->rgb_order = RGB_ORDER_BRG;
+            serial_write("Set order = brg\r\n");
         } else if (strcmp(value, "rbg") == 0) {
-            cfg->rgb_order = 3;
+            cfg->rgb_order = RGB_ORDER_RBG;
             serial_write("Set order = rbg\r\n");
-        } else if (strcmp(value, "grbw") == 0) {
-            cfg->rgb_order = 4;
-            serial_write("Set order = grbw\r\n");
+        } else if (strcmp(value, "bgr") == 0) {
+            cfg->rgb_order = RGB_ORDER_BGR;
+            serial_write("Set order = bgr\r\n");
+        } else if (strcmp(value, "gbr") == 0) {
+            cfg->rgb_order = RGB_ORDER_GBR;
+            serial_write("Set order = gbr\r\n");
         } else {
-            serial_write("Error: order must be grb, rgb, bgr, rbg, or grbw\r\n");
+            serial_write("Error: order must be grb, rgb, brg, rbg, bgr, or gbr\r\n");
         }
     }
     else if (strcmp(param, "name") == 0) {

@@ -118,6 +118,9 @@ esp_err_t monitoring_init(void)
             ESP_LOGI(TAG, "Temperature sensor enabled, current: %.1fC", initial_temp);
         } else {
             ESP_LOGW(TAG, "Failed to enable temp sensor: %s", esp_err_to_name(ret));
+            // Clean up on enable failure to prevent resource leak
+            temperature_sensor_uninstall(s_temp_sensor);
+            s_temp_sensor = NULL;
         }
     } else {
         ESP_LOGW(TAG, "Failed to install temp sensor: %s", esp_err_to_name(ret));

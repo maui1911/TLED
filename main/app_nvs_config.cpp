@@ -8,6 +8,8 @@
 #include <nvs_flash.h>
 #include <nvs.h>
 #include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 static const char *TAG = "tled_config";
 
@@ -22,6 +24,7 @@ static const uint8_t valid_gpio_pins[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 14,
 // Current configuration (in RAM)
 static tled_config_t s_config;
 static bool s_initialized = false;
+static SemaphoreHandle_t s_config_mutex = NULL;
 
 // Set defaults
 static void set_defaults(tled_config_t *config)
@@ -85,6 +88,15 @@ esp_err_t tled_config_init(void)
 {
     if (s_initialized) {
         return ESP_OK;
+    }
+
+    // Create mutex for thread-safe config access
+    if (s_config_mutex == NULL) {
+        s_config_mutex = xSemaphoreCreateMutex();
+        if (s_config_mutex == NULL) {
+            ESP_LOGE(TAG, "Failed to create config mutex");
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     // Start with defaults
@@ -154,7 +166,7 @@ esp_err_t tled_config_set(uint16_t num_leds, uint8_t gpio_pin, uint8_t rgb_order
         tled_config_init();
     }
 
-    // Validate inputs
+    // Validate inputs (before taking mutex)
     if (num_leds == 0 || num_leds > 1000) {
         ESP_LOGE(TAG, "Invalid LED count: %d (must be 1-1000)", num_leds);
         return ESP_ERR_INVALID_ARG;
@@ -175,7 +187,11 @@ esp_err_t tled_config_set(uint16_t num_leds, uint8_t gpio_pin, uint8_t rgb_order
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Apply settings
+    // Apply settings with mutex protection
+    if (s_config_mutex) {
+        xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    }
+
     s_config.num_leds = num_leds;
     s_config.gpio_pin = gpio_pin;
     s_config.rgb_order = rgb_order;
@@ -188,6 +204,10 @@ esp_err_t tled_config_set(uint16_t num_leds, uint8_t gpio_pin, uint8_t rgb_order
     }
 
     s_config.configured = true;
+
+    if (s_config_mutex) {
+        xSemaphoreGive(s_config_mutex);
+    }
 
     ESP_LOGI(TAG, "Config set: %d LEDs, GPIO%d, order=%d, chipset=%d, max_bri=%d, name=%s",
              s_config.num_leds, s_config.gpio_pin, s_config.rgb_order,
@@ -230,7 +250,16 @@ esp_err_t tled_config_save(void)
 
 void tled_config_reset_to_defaults(void)
 {
+    if (s_config_mutex) {
+        xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    }
+
     set_defaults(&s_config);
+
+    if (s_config_mutex) {
+        xSemaphoreGive(s_config_mutex);
+    }
+
     ESP_LOGI(TAG, "Config reset to defaults");
 }
 

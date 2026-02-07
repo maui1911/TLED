@@ -13,8 +13,10 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
+#include <freertos/timers.h>
 
 #include <esp_matter.h>
+#include <platform/CHIPDeviceLayer.h>
 #include "app_driver.h"
 #include "app_config.h"
 #include "app_nvs_config.h"
@@ -28,6 +30,12 @@
 #define NVS_KEY_BRIGHTNESS "brightness"
 #define NVS_KEY_HUE "hue"
 #define NVS_KEY_SATURATION "saturation"
+
+// Debounce timing for NVS saves (5 seconds)
+#define NVS_SAVE_DEBOUNCE_MS 5000
+
+// Debounce timing for HSV updates (50ms to combine rapid hue+sat changes)
+#define HSV_UPDATE_DEBOUNCE_MS 50
 
 using namespace chip::app::Clusters;
 using namespace esp_matter;
@@ -60,8 +68,8 @@ typedef struct {
     float current_sat;
     float current_val;
 
-    // Transition timing
-    uint32_t transition_start_ms;
+    // Transition timing (using ticks for proper wrap-around handling)
+    TickType_t transition_start_ticks;
     uint32_t transition_duration_ms;
     bool transitioning;
 } transition_state_t;
@@ -88,6 +96,14 @@ typedef struct {
     uint16_t num_leds;
     uint8_t gpio_pin;
     uint8_t max_brightness;
+
+    // Debounce state for HSV updates (issue 7)
+    bool hsv_update_pending;
+    TickType_t hsv_update_time;
+
+    // Debounce state for NVS saves (issue 8)
+    bool nvs_save_pending;
+    TimerHandle_t nvs_save_timer;
 } light_driver_t;
 
 // Static driver instance
@@ -107,15 +123,21 @@ static light_driver_t s_light_driver = {
     .mutex = NULL,
     .num_leds = TLED_DEFAULT_NUM_LEDS,
     .gpio_pin = TLED_DEFAULT_GPIO_PIN,
-    .max_brightness = TLED_DEFAULT_MAX_BRIGHTNESS
+    .max_brightness = TLED_DEFAULT_MAX_BRIGHTNESS,
+    .hsv_update_pending = false,
+    .hsv_update_time = 0,
+    .nvs_save_pending = false,
+    .nvs_save_timer = NULL
 };
 
 // Forward declarations
 static void transition_task(void *arg);
 static esp_err_t update_strip_rgb(light_driver_t *driver, uint8_t r, uint8_t g, uint8_t b);
+static void start_transition(light_driver_t *driver, uint8_t target_hue, uint8_t target_sat,
+                             uint8_t target_val, uint32_t duration_ms);
 
-// Save current state to NVS
-static esp_err_t save_state_to_nvs(void)
+// Actually perform the NVS save (called by timer or directly)
+static esp_err_t do_save_state_to_nvs(void)
 {
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
@@ -124,20 +146,61 @@ static esp_err_t save_state_to_nvs(void)
         return err;
     }
 
-    nvs_set_u8(handle, NVS_KEY_POWER, s_light_driver.power ? 1 : 0);
-    nvs_set_u8(handle, NVS_KEY_BRIGHTNESS, s_light_driver.brightness);
-    nvs_set_u8(handle, NVS_KEY_HUE, s_light_driver.hue);
-    nvs_set_u8(handle, NVS_KEY_SATURATION, s_light_driver.saturation);
+    // Check each nvs_set return value
+    err = nvs_set_u8(handle, NVS_KEY_POWER, s_light_driver.power ? 1 : 0);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set power: %s", esp_err_to_name(err));
+    }
+    err = nvs_set_u8(handle, NVS_KEY_BRIGHTNESS, s_light_driver.brightness);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set brightness: %s", esp_err_to_name(err));
+    }
+    err = nvs_set_u8(handle, NVS_KEY_HUE, s_light_driver.hue);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set hue: %s", esp_err_to_name(err));
+    }
+    err = nvs_set_u8(handle, NVS_KEY_SATURATION, s_light_driver.saturation);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set saturation: %s", esp_err_to_name(err));
+    }
 
     err = nvs_commit(handle);
     nvs_close(handle);
 
+    s_light_driver.nvs_save_pending = false;
+
     if (err == ESP_OK) {
-        ESP_LOGD(TAG, "State saved: power=%d, brightness=%d, hue=%d, sat=%d",
+        ESP_LOGI(TAG, "State saved to NVS: power=%d, brightness=%d, hue=%d, sat=%d",
                  s_light_driver.power, s_light_driver.brightness,
                  s_light_driver.hue, s_light_driver.saturation);
+    } else {
+        ESP_LOGE(TAG, "Failed to commit NVS: %s", esp_err_to_name(err));
     }
     return err;
+}
+
+// Timer callback for debounced NVS save
+static void nvs_save_timer_callback(TimerHandle_t timer)
+{
+    ESP_LOGD(TAG, "NVS save timer fired");
+    do_save_state_to_nvs();
+}
+
+// Schedule a debounced save to NVS (waits for stability before writing)
+static void schedule_save_state_to_nvs(void)
+{
+    s_light_driver.nvs_save_pending = true;
+
+    if (s_light_driver.nvs_save_timer != NULL) {
+        // Reset the timer - this restarts the debounce period
+        if (xTimerReset(s_light_driver.nvs_save_timer, 0) != pdPASS) {
+            ESP_LOGW(TAG, "Failed to reset NVS save timer, saving immediately");
+            do_save_state_to_nvs();
+        }
+    } else {
+        // Timer not created yet (during init), save immediately
+        do_save_state_to_nvs();
+    }
 }
 
 // Load state from NVS
@@ -233,6 +296,17 @@ static esp_err_t update_strip_array(light_driver_t *driver, uint8_t (*colors)[3]
     return driver->strip->refresh(driver->strip, 100);
 }
 
+// Apply max_brightness clamping to RGB values
+static void apply_max_brightness(light_driver_t *driver, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    if (driver->max_brightness < 255) {
+        // Scale RGB values by max_brightness/255
+        *r = (uint8_t)(((uint16_t)*r * driver->max_brightness) / 255);
+        *g = (uint8_t)(((uint16_t)*g * driver->max_brightness) / 255);
+        *b = (uint8_t)(((uint16_t)*b * driver->max_brightness) / 255);
+    }
+}
+
 // Calculate current interpolated RGB from transition state
 static void get_interpolated_rgb(light_driver_t *driver, uint8_t *r, uint8_t *g, uint8_t *b)
 {
@@ -242,26 +316,33 @@ static void get_interpolated_rgb(light_driver_t *driver, uint8_t *r, uint8_t *g,
     uint8_t val = (uint8_t)((driver->transition.current_val * STANDARD_BRIGHTNESS_MAX) / MATTER_BRIGHTNESS_MAX);
 
     hsv_to_rgb(hue, sat, val, r, g, b);
+
+    // Apply max_brightness limit (issue 9)
+    apply_max_brightness(driver, r, g, b);
 }
 
 // Linear interpolation with hue wrap-around handling
 static float lerp_hue(float from, float to, float t)
 {
     // Handle hue wrap-around (0 and 254 are adjacent on the color wheel)
+    // Matter hue range is 0-254, so full cycle is 255 values
+    const float HUE_RANGE = 255.0f;
+    const float HALF_RANGE = HUE_RANGE / 2.0f;
+
     float diff = to - from;
 
     // If the difference is more than half the range, go the short way around
-    if (diff > 127.0f) {
-        diff -= 254.0f;
-    } else if (diff < -127.0f) {
-        diff += 254.0f;
+    if (diff > HALF_RANGE) {
+        diff -= HUE_RANGE;
+    } else if (diff < -HALF_RANGE) {
+        diff += HUE_RANGE;
     }
 
     float result = from + diff * t;
 
     // Wrap result to valid range [0, 254]
-    while (result < 0) result += 254.0f;
-    while (result > 254.0f) result -= 254.0f;
+    while (result < 0) result += HUE_RANGE;
+    while (result >= HUE_RANGE) result -= HUE_RANGE;
 
     return result;
 }
@@ -274,6 +355,8 @@ static float lerp(float from, float to, float t)
 // Rainbow effect - cycle through hues
 static void effect_rainbow(light_driver_t *driver)
 {
+    if (driver->strip == NULL) return;
+
     // Use effect_step as hue offset
     uint16_t base_hue = driver->effect_step % 360;
 
@@ -282,6 +365,7 @@ static void effect_rainbow(light_driver_t *driver)
 
     uint8_t r, g, b;
     hsv_to_rgb(base_hue, 100, val, &r, &g, &b);
+    apply_max_brightness(driver, &r, &g, &b);
     update_strip_rgb(driver, r, g, b);
 
     driver->effect_step += 2;  // Speed of rainbow
@@ -290,6 +374,8 @@ static void effect_rainbow(light_driver_t *driver)
 // Breathing effect - pulse brightness
 static void effect_breathing(light_driver_t *driver)
 {
+    if (driver->strip == NULL) return;
+
     // Sine wave for smooth breathing
     float phase = (float)(driver->effect_step % 360) * 3.14159f / 180.0f;
     float breath = (sinf(phase) + 1.0f) / 2.0f;  // 0-1 range
@@ -304,6 +390,7 @@ static void effect_breathing(light_driver_t *driver)
 
     uint8_t r, g, b;
     hsv_to_rgb(hue, sat, val, &r, &g, &b);
+    apply_max_brightness(driver, &r, &g, &b);
     update_strip_rgb(driver, r, g, b);
 
     driver->effect_step += 3;  // Speed of breathing
@@ -312,6 +399,8 @@ static void effect_breathing(light_driver_t *driver)
 // Candle flicker effect
 static void effect_candle(light_driver_t *driver)
 {
+    if (driver->strip == NULL) return;
+
     // Random flicker with warm color
     uint8_t max_val = (driver->brightness * STANDARD_BRIGHTNESS_MAX) / MATTER_BRIGHTNESS_MAX;
 
@@ -324,6 +413,7 @@ static void effect_candle(light_driver_t *driver)
 
     uint8_t r, g, b;
     hsv_to_rgb(hue, 100, val, &r, &g, &b);
+    apply_max_brightness(driver, &r, &g, &b);
     update_strip_rgb(driver, r, g, b);
 
     driver->effect_step++;
@@ -332,6 +422,8 @@ static void effect_candle(light_driver_t *driver)
 // Chase effect - moving dot
 static void effect_chase(light_driver_t *driver)
 {
+    if (driver->strip == NULL) return;
+
     // Get current color
     uint16_t hue = (driver->hue * STANDARD_HUE_MAX) / MATTER_HUE_MAX;
     uint8_t sat = (driver->saturation * STANDARD_SATURATION_MAX) / MATTER_SATURATION_MAX;
@@ -339,6 +431,7 @@ static void effect_chase(light_driver_t *driver)
 
     uint8_t r, g, b;
     hsv_to_rgb(hue, sat, val, &r, &g, &b);
+    apply_max_brightness(driver, &r, &g, &b);
 
     // Current position
     int num_leds = driver->num_leds;
@@ -369,12 +462,40 @@ static void transition_task(void *arg)
     while (true) {
         xSemaphoreTake(driver->mutex, portMAX_DELAY);
 
+        // Check for pending HSV updates that have been stable for debounce period (issue 7)
+        if (driver->hsv_update_pending) {
+            TickType_t now = xTaskGetTickCount();
+            uint32_t elapsed_ms = (uint32_t)(now - driver->hsv_update_time) * portTICK_PERIOD_MS;
+            if (elapsed_ms >= HSV_UPDATE_DEBOUNCE_MS) {
+                // Debounce period elapsed - start the transition
+                driver->hsv_update_pending = false;
+                uint8_t hue = driver->hue;
+                uint8_t sat = driver->saturation;
+                uint8_t bri = driver->brightness;
+                xSemaphoreGive(driver->mutex);
+
+                ESP_LOGI(TAG, "HSV debounce complete: H=%d S=%d, starting transition", hue, sat);
+                start_transition(driver, hue, sat, bri, TLED_DEFAULT_TRANSITION_MS);
+
+                xSemaphoreTake(driver->mutex, portMAX_DELAY);
+            }
+        }
+
         if (!driver->power) {
-            // Light is off - just set black and wait
-            update_strip_rgb(driver, 0, 0, 0);
-            xSemaphoreGive(driver->mutex);
-            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(100));
-            continue;
+            // Light is off - check if we're fading out (transitioning to val=0)
+            if (driver->transition.transitioning && driver->transition.target_val == 0) {
+                // Let the fade-out transition continue - don't skip to black yet
+                // Fall through to transition handling below
+            } else {
+                // No fade-out in progress - set black and wait
+                update_strip_rgb(driver, 0, 0, 0);
+                // Keep current_val synced with actual output so transitions start from 0
+                driver->transition.current_val = 0;
+                driver->transition.transitioning = false;
+                xSemaphoreGive(driver->mutex);
+                vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(100));
+                continue;
+            }
         }
 
         // Check if we're running an effect
@@ -400,8 +521,9 @@ static void transition_task(void *arg)
 
         // Handle transition
         if (driver->transition.transitioning) {
-            uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
-            uint32_t elapsed = now - driver->transition.transition_start_ms;
+            // Use tick difference that handles wrap-around correctly (unsigned subtraction)
+            TickType_t now_ticks = xTaskGetTickCount();
+            uint32_t elapsed = (uint32_t)(now_ticks - driver->transition.transition_start_ticks) * portTICK_PERIOD_MS;
 
             if (elapsed >= driver->transition.transition_duration_ms) {
                 // Transition complete
@@ -465,7 +587,7 @@ static void start_transition(light_driver_t *driver, uint8_t target_hue, uint8_t
     driver->transition.target_hue = target_hue;
     driver->transition.target_sat = target_sat;
     driver->transition.target_val = target_val;
-    driver->transition.transition_start_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    driver->transition.transition_start_ticks = xTaskGetTickCount();
     driver->transition.transition_duration_ms = duration_ms > 0 ? duration_ms : 1;
     driver->transition.transitioning = true;
 
@@ -496,8 +618,9 @@ static esp_err_t update_immediate(light_driver_t *driver)
         uint8_t sat = (driver->saturation * STANDARD_SATURATION_MAX) / MATTER_SATURATION_MAX;
         uint8_t val = (driver->brightness * STANDARD_BRIGHTNESS_MAX) / MATTER_BRIGHTNESS_MAX;
         hsv_to_rgb(hue, sat, val, &r, &g, &b);
-        ESP_LOGI(TAG, "HSV mode: H=%d S=%d V=%d -> R=%d G=%d B=%d",
-                 driver->hue, driver->saturation, driver->brightness, r, g, b);
+        apply_max_brightness(driver, &r, &g, &b);
+        ESP_LOGI(TAG, "HSV mode: H=%d S=%d V=%d -> R=%d G=%d B=%d (max_bri=%d)",
+                 driver->hue, driver->saturation, driver->brightness, r, g, b, driver->max_brightness);
     }
 
     // Also update transition state to match
@@ -523,20 +646,22 @@ esp_err_t app_driver_light_set_power(app_driver_handle_t handle, bool power)
         return ESP_ERR_INVALID_ARG;
     }
 
-    driver->power = power;
     ESP_LOGI(TAG, "LED power set to %s", power ? "ON" : "OFF");
 
-    save_state_to_nvs();
-
     if (power) {
-        // Fade in
+        // Set power ON first, then start fade-in from 0
+        driver->power = power;
+        driver->transition.current_val = 0;  // Ensure we start from black
         start_transition(driver, driver->hue, driver->saturation, driver->brightness,
                         TLED_DEFAULT_TRANSITION_MS);
     } else {
-        // Fade out - target brightness 0
+        // Start fade-out BEFORE setting power off to avoid race with transition task
         start_transition(driver, driver->hue, driver->saturation, 0,
                         TLED_DEFAULT_TRANSITION_MS);
+        driver->power = power;  // Set power off after transition is started
     }
+
+    schedule_save_state_to_nvs();
 
     return ESP_OK;
 }
@@ -546,6 +671,13 @@ bool app_driver_light_get_power(app_driver_handle_t handle)
     light_driver_t *driver = (light_driver_t *)handle;
     if (driver == NULL) {
         return false;
+    }
+    // Single-byte read is atomic on ESP32, but use mutex for consistency if available
+    if (driver->mutex != NULL) {
+        xSemaphoreTake(driver->mutex, portMAX_DELAY);
+        bool power = driver->power;
+        xSemaphoreGive(driver->mutex);
+        return power;
     }
     return driver->power;
 }
@@ -560,7 +692,7 @@ esp_err_t app_driver_light_set_brightness(app_driver_handle_t handle, uint8_t br
     driver->brightness = brightness;
     ESP_LOGI(TAG, "Brightness set to %d", brightness);
 
-    save_state_to_nvs();
+    schedule_save_state_to_nvs();
 
     // Use default transition
     start_transition(driver, driver->hue, driver->saturation, brightness,
@@ -581,7 +713,7 @@ esp_err_t app_driver_light_set_brightness_with_transition(app_driver_handle_t ha
     driver->brightness = brightness;
     ESP_LOGI(TAG, "Brightness set to %d (transition %lums)", brightness, (unsigned long)transition_ms);
 
-    save_state_to_nvs();
+    schedule_save_state_to_nvs();
 
     if (transition_ms == 0) {
         return update_immediate(driver);
@@ -602,7 +734,7 @@ esp_err_t app_driver_light_set_hsv(app_driver_handle_t handle, uint8_t hue, uint
     driver->saturation = saturation;
     ESP_LOGI(TAG, "Color set to H=%d S=%d", hue, saturation);
 
-    save_state_to_nvs();
+    schedule_save_state_to_nvs();
 
     // Use default transition
     start_transition(driver, hue, saturation, driver->brightness,
@@ -625,7 +757,7 @@ esp_err_t app_driver_light_set_hsv_with_transition(app_driver_handle_t handle,
     driver->saturation = saturation;
     ESP_LOGI(TAG, "Color set to H=%d S=%d (transition %lums)", hue, saturation, (unsigned long)transition_ms);
 
-    save_state_to_nvs();
+    schedule_save_state_to_nvs();
 
     if (transition_ms == 0) {
         return update_immediate(driver);
@@ -661,6 +793,13 @@ uint8_t app_driver_light_get_effect(app_driver_handle_t handle)
     if (driver == NULL) {
         return TLED_EFFECT_NONE;
     }
+    // Single-byte read is atomic on ESP32, but use mutex for consistency if available
+    if (driver->mutex != NULL) {
+        xSemaphoreTake(driver->mutex, portMAX_DELAY);
+        uint8_t effect = driver->effect_id;
+        xSemaphoreGive(driver->mutex);
+        return effect;
+    }
     return driver->effect_id;
 }
 
@@ -668,17 +807,20 @@ static void app_driver_button_toggle_cb(void *button_handle, void *usr_data)
 {
     ESP_LOGI(TAG, "Toggle button pressed");
 
-    // Get current on/off state and toggle it
-    attribute_t *attribute = attribute::get(light_endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id);
-    if (attribute == NULL) {
-        ESP_LOGE(TAG, "Failed to get OnOff attribute");
-        return;
-    }
+    // Schedule attribute access on the Matter thread to ensure thread safety
+    chip::DeviceLayer::SystemLayer().ScheduleLambda([]() {
+        // Get current on/off state and toggle it
+        attribute_t *attribute = attribute::get(light_endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id);
+        if (attribute == NULL) {
+            ESP_LOGE(TAG, "Failed to get OnOff attribute");
+            return;
+        }
 
-    esp_matter_attr_val_t val = esp_matter_invalid(NULL);
-    attribute::get_val(attribute, &val);
-    val.val.b = !val.val.b;
-    attribute::update(light_endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id, &val);
+        esp_matter_attr_val_t val = esp_matter_invalid(NULL);
+        attribute::get_val(attribute, &val);
+        val.val.b = !val.val.b;
+        attribute::update(light_endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id, &val);
+    });
 }
 
 esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
@@ -689,6 +831,11 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
 {
     esp_err_t err = ESP_OK;
     light_driver_t *driver = (light_driver_t *)driver_handle;
+
+    if (driver == NULL || driver->mutex == NULL) {
+        // Driver not initialized yet - ignore during boot
+        return ESP_OK;
+    }
 
     if (endpoint_id != light_endpoint_id) {
         return ESP_OK;  // Not our endpoint
@@ -703,18 +850,30 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
             err = app_driver_light_set_brightness(driver_handle, val->val.u8);
         }
     } else if (cluster_id == ColorControl::Id) {
+        // Protect state modifications with mutex
+        xSemaphoreTake(driver->mutex, portMAX_DELAY);
         if (attribute_id == ColorControl::Attributes::CurrentHue::Id) {
             driver->hue = val->val.u8;
             driver->color_mode = COLOR_MODE_HSV;
-            save_state_to_nvs();
-            start_transition(driver, driver->hue, driver->saturation, driver->brightness,
-                            TLED_DEFAULT_TRANSITION_MS);
+            // Mark HSV update as pending with debounce (issue 7)
+            driver->hsv_update_pending = true;
+            driver->hsv_update_time = xTaskGetTickCount();
+            ESP_LOGD(TAG, "HSV update pending: hue=%d", driver->hue);
         } else if (attribute_id == ColorControl::Attributes::CurrentSaturation::Id) {
             driver->saturation = val->val.u8;
             driver->color_mode = COLOR_MODE_HSV;
-            save_state_to_nvs();
-            start_transition(driver, driver->hue, driver->saturation, driver->brightness,
-                            TLED_DEFAULT_TRANSITION_MS);
+            // Mark HSV update as pending with debounce (issue 7)
+            driver->hsv_update_pending = true;
+            driver->hsv_update_time = xTaskGetTickCount();
+            ESP_LOGD(TAG, "HSV update pending: sat=%d", driver->saturation);
+        }
+        xSemaphoreGive(driver->mutex);
+
+        // Schedule NVS save (debounced)
+        if (attribute_id == ColorControl::Attributes::CurrentHue::Id ||
+            attribute_id == ColorControl::Attributes::CurrentSaturation::Id) {
+            schedule_save_state_to_nvs();
+            // Note: Transition is started by transition_task after debounce period
         }
     }
 
@@ -724,6 +883,10 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
 esp_err_t app_driver_light_set_defaults(uint16_t endpoint_id)
 {
     void *priv_data = endpoint::get_priv_data(endpoint_id);
+    if (priv_data == NULL) {
+        ESP_LOGE(TAG, "Failed to get priv_data for endpoint %d", endpoint_id);
+        return ESP_ERR_INVALID_STATE;
+    }
     light_driver_t *driver = (light_driver_t *)priv_data;
 
     // Get power-on behavior from config
@@ -873,6 +1036,20 @@ app_driver_handle_t app_driver_light_init(void)
 
     // Clear all LEDs in buffer (turns off any leftover LEDs from previous config)
     s_light_driver.strip->clear(s_light_driver.strip, 100);
+
+    // Create NVS save timer for debounced writes (issue 8)
+    s_light_driver.nvs_save_timer = xTimerCreate(
+        "nvs_save",
+        pdMS_TO_TICKS(NVS_SAVE_DEBOUNCE_MS),
+        pdFALSE,  // One-shot timer
+        NULL,
+        nvs_save_timer_callback
+    );
+    if (s_light_driver.nvs_save_timer == NULL) {
+        ESP_LOGW(TAG, "Failed to create NVS save timer, saves will be immediate");
+    } else {
+        ESP_LOGI(TAG, "NVS save timer created (debounce: %dms)", NVS_SAVE_DEBOUNCE_MS);
+    }
 
     // Start the transition/effect task
     BaseType_t ret = xTaskCreate(
