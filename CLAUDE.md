@@ -131,8 +131,15 @@ app_driver_light_set_effect(handle, effect_id);
 | 2 | ✅ Done | RGB color, brightness, NVS persistence |
 | 3 | ✅ Done | Smooth transitions & effects |
 | 4 | ✅ Done | Kconfig + NVS config system |
-| 4b | ✅ Done | Web installer + serial config |
+| 4b | ✅ Done | Web installer + serial config + device branding |
 | 5 | ⏳ | OTA updates, watchdog, safety features |
+
+### v0.5.0 Features (Phase 4b Complete)
+- Custom device branding: Shows "TLED" / "Matter LED Controller" in Home Assistant
+- Unique BLE UUIDs (not hardcoded test values)
+- Web installer with QR code display, serial console, help documentation
+- Serial `factory` command clears Matter fabric data
+- Fixed flash offsets in web installer manifest
 
 ## Phase 3 Details - Transitions & Effects
 
@@ -202,9 +209,12 @@ idf.py build
 1. ✅ Web installer page with ESP Web Tools
 2. ✅ GitHub Actions workflow for Pages deployment
 3. ✅ Serial configuration interface
-4. ⏳ Enable GitHub Pages (Settings → Pages → GitHub Actions)
-5. ⏳ OTA updates via Matter (Phase 5)
-6. ⏳ Watchdog and safety features (Phase 5)
+4. ✅ Custom device branding (DeviceInstanceInfoProvider)
+5. ⏳ OTA updates via Matter
+6. ⏳ Watchdog timer and crash recovery
+7. ⏳ Thermal monitoring and safety features
+8. ⏳ Power-on behavior settings
+9. ⏳ TLED enclosure design
 
 ## Known Issues / Notes
 - First commission after erase-flash may take a moment
