@@ -77,9 +77,12 @@ CONFIG_LOG_DEFAULT_LEVEL=3
 # Use custom device instance info provider (for TLED branding)
 CONFIG_CUSTOM_DEVICE_INSTANCE_INFO_PROVIDER=y
 
-# Watchdog - longer timeout for OTA operations (120s)
+# Watchdog - longer timeout for OTA/Thread operations (120s)
+# Both modern and legacy config names to ensure it sticks
 CONFIG_ESP_TASK_WDT_PANIC=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=120
+CONFIG_TASK_WDT_PANIC=y
+CONFIG_TASK_WDT_TIMEOUT_S=120
 
 # BSP Configuration for DFRobot Beetle ESP32-C6
 # Button (Boot button on GPIO9)
