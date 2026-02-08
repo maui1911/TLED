@@ -2,15 +2,21 @@
 
 A Matter-compatible LED strip controller for ESP32-C6 that works over Thread networking. Control addressable LED strips (WS2812B, SK6812, etc.) from Home Assistant, Apple Home, Google Home, or any Matter-compatible smart home platform.
 
+> **Disclaimer:** This entire firmware was written by AI ([Claude](https://claude.ai) by Anthropic). I ([@maui1911](https://github.com/maui1911)) have not read or written a single line of code — I only provided direction, tested on real hardware, and deployed. Use at your own risk.
+
 ## Features
 
 - **Matter over Thread** - Native Matter protocol, no cloud or WiFi required
-- **Full RGB control** - Color picker, brightness, on/off from your smart home app
+- **Full RGB + RGBW control** - Color picker, brightness, on/off from your smart home app
 - **Smooth transitions** - 300ms fades on all changes
 - **Thread mesh networking** - Self-healing network, device acts as a router
 - **Web-based installer** - Flash firmware directly from your browser
 - **USB configuration** - Change settings via serial without recompiling
 - **NVS persistence** - Settings survive reboots
+- **Temperature monitoring** - Chip temperature exposed to Home Assistant
+- **Health monitoring** - Watchdog timer, heap tracking, auto-reboot on hang
+- **Power-on behavior** - Configurable: restore last state, always on, or always off
+- **Built-in effects** - Rainbow, breathing, candle, chase (implemented but not yet user-accessible, untested)
 
 ## Hardware
 
@@ -19,7 +25,7 @@ This project was developed for the **[DFRobot Beetle ESP32-C6](https://wiki.dfro
 ### Requirements
 
 - **ESP32-C6 board** - DFRobot Beetle ESP32-C6 recommended (or any ESP32-C6)
-- **Addressable LED strip** - WS2812B, WS2811, or SK6812
+- **Addressable LED strip** - WS2812B, WS2811, or SK6812 (RGBW)
 - **5V power supply** - Size for your LED count (~60mA per LED at full white)
 - **Thread border router** - HomePod Mini, Apple TV 4K, Google Nest Hub, or dedicated like SLZB-06/SMLight
 
@@ -27,19 +33,24 @@ This project was developed for the **[DFRobot Beetle ESP32-C6](https://wiki.dfro
 
 A parametric OpenSCAD enclosure design is included in the `enclosure/` folder, sized specifically for the DFRobot Beetle ESP32-C6.
 
+<p align="center">
+  <img src="images/enclosure_render.png" alt="Enclosure render" width="400">
+  <img src="images/enclosure_photo.png" alt="Printed enclosure" width="300">
+</p>
+
 **Features:**
 - **Friction-fit lid** - No screws needed, snaps securely in place
 - **USB-C port cutout** - Easy access for flashing and power
 - **Wire slit** - Solder your wires first, then slide them into the enclosure
 - **Super compact** - Just slightly larger than the Beetle board itself
 
+Ready-to-print STL files (`tled_base.stl`, `tled_lid.stl`) are included in the `enclosure/` folder. If you want to tweak dimensions, open `tled_enclosure.scad` in [OpenSCAD](https://openscad.org/) - it's fully parametric so you can adjust wall thickness, tolerances, and ventilation hole sizes.
+
 **Printing tips:**
 - Print the base upside-down (opening facing up)
 - 0.2mm layer height works well
 - No supports needed
 - PLA or PETG recommended
-
-See `enclosure/tled_enclosure.scad` - open in OpenSCAD to customize dimensions and export STL files.
 
 ## Quick Start
 
@@ -69,9 +80,11 @@ After reboot, a QR code will appear in the web installer. Scan it with:
 |---------|---------|-------------|
 | LED Count | 10 | Number of LEDs in your strip (1-1000) |
 | GPIO Pin | 5 | Data pin connected to LED strip |
-| LED Type | WS2812B | Chipset: WS2812B, WS2811, or SK6812 |
+| LED Type | WS2812B | Chipset: WS2812B, WS2811, or SK6812 (RGBW) |
 | RGB Order | GRB | Color byte order (try others if colors are wrong) |
 | Max Brightness | 255 | Limits maximum brightness (saves power) |
+| Device Name | TLED | Name shown in your smart home app |
+| Power-on | restore | Behavior on power up: restore last state, on, or off |
 
 ## Wiring
 
@@ -92,12 +105,14 @@ Connect via USB and use the serial console in the web installer, or any serial t
 ```
 help                    Show available commands
 config                  Show current configuration
-set leds <n>            Set number of LEDs
-set gpio <n>            Set GPIO pin
+set leds <n>            Set number of LEDs (1-1000)
+set gpio <n>            Set data GPIO pin
 set type <type>         Set LED type (ws2812b/ws2811/sk6812)
-set order <order>       Set RGB order (grb/rgb/bgr/rbg)
+set order <order>       Set RGB order (grb/rgb/brg/rbg/bgr/gbr)
 set brightness <1-255>  Set max brightness
-save                    Save configuration to flash
+set name <name>         Set device name
+set poweron <mode>      Power-on behavior (restore/on/off)
+save                    Save configuration and reboot
 reboot                  Restart device
 factory                 Factory reset (erases settings & commissioning)
 ```
@@ -164,32 +179,24 @@ idf.py menuconfig
 ```
 TLED/
 ├── main/
-│   ├── app_main.cpp          # Matter setup, endpoint creation
-│   ├── app_driver.cpp        # LED strip driver, transitions
-│   ├── app_nvs_config.cpp    # Runtime configuration storage
-│   ├── app_serial_config.cpp # USB serial command interface
-│   └── Kconfig.projbuild     # Build-time configuration options
+│   ├── app_main.cpp            # Matter setup, endpoint creation
+│   ├── app_driver.cpp          # LED strip driver, transitions, effects
+│   ├── app_nvs_config.cpp      # Runtime configuration storage
+│   ├── app_serial_config.cpp   # USB serial command interface
+│   ├── app_monitoring.cpp      # Health monitoring, watchdog, temperature
+│   ├── app_device_info.cpp     # Matter device branding
+│   ├── app_ble_config.cpp      # BLE commissioning configuration
+│   └── Kconfig.projbuild       # Build-time configuration options
 ├── web-installer/
-│   ├── index.html            # Web installer & configurator
-│   └── manifest.json         # ESP Web Tools manifest
+│   ├── index.html              # Web installer & configurator
+│   └── manifest.json           # ESP Web Tools manifest
 ├── enclosure/
-│   └── tled_enclosure.scad   # OpenSCAD parametric enclosure design
-├── partitions.csv            # Flash partition layout
-└── sdkconfig.defaults        # Default SDK configuration
+│   ├── tled_enclosure.scad     # OpenSCAD parametric enclosure design
+│   ├── tled_base.stl           # Pre-exported base STL
+│   └── tled_lid.stl            # Pre-exported lid STL
+├── partitions.csv              # Flash partition layout
+└── sdkconfig.defaults          # Default SDK configuration
 ```
-
-## Roadmap
-
-- [x] Basic on/off control via Matter
-- [x] RGB color control (HSV)
-- [x] Brightness control
-- [x] Smooth transitions
-- [x] NVS persistence
-- [x] Web installer
-- [x] Serial configuration
-- [ ] OTA updates via Matter
-- [ ] Built-in effects (rainbow, breathing, etc.) exposed to Matter
-- [ ] Multiple segments/zones
 
 ## License
 

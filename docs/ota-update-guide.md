@@ -159,7 +159,7 @@ openssl dgst -sha256 -binary tled-0.6.2.ota | base64
 
 ```bash
 # Full OTA creation workflow
-cd ~/dev/noscope.TLED
+cd ~/dev/TLED
 
 # 1. Update version in CMakeLists.txt, then:
 idf.py build

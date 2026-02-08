@@ -30,11 +30,11 @@ Beetle GPIO4 ──────────► LED Strip DATA
 
 | Location | Purpose |
 |----------|---------|
-| `~/dev/noscope.TLED/` | **TLED firmware project root** (all source code, config, build output) |
+| `~/dev/TLED/` | **TLED firmware project root** (all source code, config, build output) |
 | `~/esp/esp-idf/` | ESP-IDF v5.4.1 toolchain (shared, do not modify) |
 | `~/esp/esp-matter/` | ESP-Matter SDK (shared, do not modify) |
 
-> **Important:** The TLED firmware lives in `~/dev/noscope.TLED/`, separate from the ESP toolchains in `~/esp/`. This keeps the project cleanly isolated and easy to manage with Git/Claude Code.
+> **Important:** The TLED firmware lives in `~/dev/TLED/`, separate from the ESP toolchains in `~/esp/`. This keeps the project cleanly isolated and easy to manage with Git/Claude Code.
 
 ---
 
@@ -59,7 +59,7 @@ Beetle GPIO4 ──────────► LED Strip DATA
 ## Repository Structure
 
 ```
-~/dev/noscope.TLED/
+~/dev/TLED/
 ├── main/
 │   ├── CMakeLists.txt
 │   ├── app_main.cpp          # Entry point, Matter + Thread init
@@ -171,7 +171,7 @@ If this example builds, flashes, and shows a Matter commissioning QR code in the
 ### Tasks
 
 1. **Create project scaffolding**
-   - Set up the `~/dev/noscope.TLED/` repo structure shown above
+   - Set up the `~/dev/TLED/` repo structure shown above
    - Configure `CMakeLists.txt` for ESP-Matter
    - Create `partitions.csv` with enough space for Matter + Thread (needs OTA partition, NVS, factory data, etc.)
    - Set up `sdkconfig.defaults`:
@@ -530,7 +530,7 @@ Flash partition layout needs to accommodate: app, OTA, NVS, factory data (Matter
 | Item | Value |
 |------|-------|
 | **Project Name** | TLED |
-| **Project Path** | `~/dev/noscope.TLED/` |
+| **Project Path** | `~/dev/TLED/` |
 | **Board** | DFRobot Beetle ESP32-C6 v1.1 |
 | **Chip** | ESP32-C6FH4 (RISC-V, 160MHz) |
 | **Flash** | 4MB |
@@ -560,8 +560,8 @@ get_matter
 set_cache
 
 # 2. Create project directory
-mkdir -p ~/dev/noscope.TLED
-cd ~/dev/noscope.TLED
+mkdir -p ~/dev/TLED
+cd ~/dev/TLED
 
 # 3. Initialize as ESP-IDF project
 idf.py create-project tled

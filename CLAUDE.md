@@ -94,7 +94,7 @@ idf.py build
 
 ## Project Structure
 ```
-~/dev/noscope.TLED/
+~/dev/TLED/
 ├── main/
 │   ├── app_main.cpp        # Matter setup, endpoint creation
 │   ├── app_driver.cpp      # LED strip driver, NVS persistence
