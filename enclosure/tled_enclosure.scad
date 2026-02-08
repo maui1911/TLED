@@ -251,8 +251,11 @@ module print_layout() {
 
 module closed() {
     // Lid sits on top, overlapping the base walls
+    // Rotate 180° around X to flip, 180° around Z to fix front/back
     base();
-    translate([0, 0, inner_h - lid_overlap]) lid();
+    translate([24, 0, inner_h + wall])
+        rotate([180, 0, 180])
+        lid();
 }
 
 // ============== RENDER ==============

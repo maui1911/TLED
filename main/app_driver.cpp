@@ -5,7 +5,6 @@
 
 #include <esp_log.h>
 #include <driver/gpio.h>
-#include <driver/rmt.h>
 #include <led_strip.h>
 #include <math.h>
 #include <nvs_flash.h>
@@ -76,7 +75,8 @@ typedef struct {
 
 // Driver state structure
 typedef struct {
-    led_strip_t *strip;
+    led_strip_handle_t strip;
+    bool is_rgbw;
     bool power;
     uint8_t brightness;     // 0-254 (Matter range)
     uint8_t hue;            // 0-254 (Matter range)
@@ -109,6 +109,7 @@ typedef struct {
 // Static driver instance
 static light_driver_t s_light_driver = {
     .strip = NULL,
+    .is_rgbw = false,
     .power = false,
     .brightness = 127,
     .hue = 0,
@@ -268,6 +269,30 @@ static void hsv_to_rgb(uint16_t h, uint8_t s, uint8_t v, uint8_t *r, uint8_t *g,
     }
 }
 
+// Extract white component from RGB for RGBW strips
+static void rgb_to_rgbw(uint8_t r, uint8_t g, uint8_t b,
+                         uint8_t *ro, uint8_t *go, uint8_t *bo, uint8_t *wo)
+{
+    uint8_t w = r < g ? r : g;
+    w = w < b ? w : b;
+    *ro = r - w;
+    *go = g - w;
+    *bo = b - w;
+    *wo = w;
+}
+
+// Set a single pixel, handling RGBW conversion if needed
+static esp_err_t driver_set_pixel(light_driver_t *driver, int index,
+                                   uint8_t r, uint8_t g, uint8_t b)
+{
+    if (driver->is_rgbw) {
+        uint8_t ro, go, bo, wo;
+        rgb_to_rgbw(r, g, b, &ro, &go, &bo, &wo);
+        return led_strip_set_pixel_rgbw(driver->strip, index, ro, go, bo, wo);
+    }
+    return led_strip_set_pixel(driver->strip, index, r, g, b);
+}
+
 // Update strip with specific RGB values
 static esp_err_t update_strip_rgb(light_driver_t *driver, uint8_t r, uint8_t g, uint8_t b)
 {
@@ -276,10 +301,10 @@ static esp_err_t update_strip_rgb(light_driver_t *driver, uint8_t r, uint8_t g, 
     }
 
     for (int i = 0; i < driver->num_leds; i++) {
-        driver->strip->set_pixel(driver->strip, i, r, g, b);
+        driver_set_pixel(driver, i, r, g, b);
     }
 
-    return driver->strip->refresh(driver->strip, 100);
+    return led_strip_refresh(driver->strip);
 }
 
 // Update strip with per-LED RGB array (for chase effects etc)
@@ -290,10 +315,10 @@ static esp_err_t update_strip_array(light_driver_t *driver, uint8_t (*colors)[3]
     }
 
     for (int i = 0; i < driver->num_leds; i++) {
-        driver->strip->set_pixel(driver->strip, i, colors[i][0], colors[i][1], colors[i][2]);
+        driver_set_pixel(driver, i, colors[i][0], colors[i][1], colors[i][2]);
     }
 
-    return driver->strip->refresh(driver->strip, 100);
+    return led_strip_refresh(driver->strip);
 }
 
 // Apply max_brightness clamping to RGB values
@@ -441,15 +466,15 @@ static void effect_chase(light_driver_t *driver)
     // Set all LEDs
     for (int i = 0; i < num_leds; i++) {
         if (i == pos) {
-            driver->strip->set_pixel(driver->strip, i, r, g, b);
+            driver_set_pixel(driver, i, r, g, b);
         } else if (i == trail) {
-            driver->strip->set_pixel(driver->strip, i, r / 3, g / 3, b / 3);
+            driver_set_pixel(driver, i, r / 3, g / 3, b / 3);
         } else {
-            driver->strip->set_pixel(driver->strip, i, 0, 0, 0);
+            driver_set_pixel(driver, i, 0, 0, 0);
         }
     }
 
-    driver->strip->refresh(driver->strip, 100);
+    led_strip_refresh(driver->strip);
     driver->effect_step++;
 }
 
@@ -1007,35 +1032,48 @@ app_driver_handle_t app_driver_light_init(void)
         return NULL;
     }
 
-    // Configure RMT for WS2812B
-    rmt_config_t rmt_cfg = RMT_DEFAULT_CONFIG_TX((gpio_num_t)s_light_driver.gpio_pin, RMT_CHANNEL_0);
-    rmt_cfg.clk_div = 2;
+    // Determine if RGBW mode based on chipset
+    s_light_driver.is_rgbw = (config->chipset == CHIPSET_SK6812);
 
-    esp_err_t err = rmt_config(&rmt_cfg);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure RMT: %s", esp_err_to_name(err));
-        return NULL;
-    }
-
-    err = rmt_driver_install(rmt_cfg.channel, 0, 0);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to install RMT driver: %s", esp_err_to_name(err));
-        return NULL;
-    }
-
-    // Configure LED strip with extra buffer to clear any previous LEDs
-    // Use max of configured LEDs or 100 to ensure we clear leftover data from previous config
+    // Buffer size: use max of configured LEDs or 100 to clear leftover data
     uint16_t strip_buffer_size = s_light_driver.num_leds > 100 ? s_light_driver.num_leds : 100;
-    led_strip_config_t strip_config = LED_STRIP_DEFAULT_CONFIG(strip_buffer_size, (led_strip_dev_t)rmt_cfg.channel);
-    s_light_driver.strip = led_strip_new_rmt_ws2812(&strip_config);
-    if (s_light_driver.strip == NULL) {
-        ESP_LOGE(TAG, "Failed to create LED strip");
-        rmt_driver_uninstall(rmt_cfg.channel);
+
+    // Determine LED model
+    led_model_t led_model;
+    switch (config->chipset) {
+        case CHIPSET_SK6812: led_model = LED_MODEL_SK6812; break;
+        case CHIPSET_WS2811: led_model = LED_MODEL_WS2812; break;
+        default:             led_model = LED_MODEL_WS2812; break;
+    }
+
+    // Configure LED strip
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = s_light_driver.gpio_pin,
+        .max_leds = strip_buffer_size,
+        .led_pixel_format = s_light_driver.is_rgbw ? LED_PIXEL_FORMAT_GRBW : LED_PIXEL_FORMAT_GRB,
+        .led_model = led_model,
+        .flags = { .invert_out = false },
+    };
+
+    led_strip_rmt_config_t rmt_config = {
+        .clk_src = RMT_CLK_SRC_DEFAULT,
+        .resolution_hz = 10 * 1000 * 1000,
+        .mem_block_symbols = 64,
+        .flags = { .with_dma = false },
+    };
+
+    esp_err_t err = led_strip_new_rmt_device(&strip_config, &rmt_config, &s_light_driver.strip);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create LED strip: %s", esp_err_to_name(err));
         return NULL;
     }
+
+    ESP_LOGI(TAG, "LED strip created: model=%s, format=%s",
+             s_light_driver.is_rgbw ? "SK6812" : "WS2812",
+             s_light_driver.is_rgbw ? "GRBW" : "GRB");
 
     // Clear all LEDs in buffer (turns off any leftover LEDs from previous config)
-    s_light_driver.strip->clear(s_light_driver.strip, 100);
+    led_strip_clear(s_light_driver.strip);
 
     // Create NVS save timer for debounced writes (issue 8)
     s_light_driver.nvs_save_timer = xTimerCreate(

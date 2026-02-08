@@ -1,4 +1,5 @@
 dependencies:
   espressif/button: "^4"
+  espressif/led_strip: "^2.5"
   idf:
     version: ">=5.0.0"

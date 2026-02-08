@@ -66,6 +66,32 @@ After flashing, the QR code URL appears in serial output:
 https://project-chip.github.io/connectedhomeip/qrcode.html?data=MT%3AY.K9042C00KA0648G00
 ```
 
+### Releasing a New Version
+When releasing a new version, update these files:
+
+1. **CMakeLists.txt** - Firmware version (shown in logs)
+   ```cmake
+   set(PROJECT_VER "0.6.1")
+   set(PROJECT_VER_NUMBER 7)  # Increment for OTA comparison
+   ```
+
+2. **web-installer/manifest.json** - Web installer version
+   ```json
+   "version": "0.6.1",
+   ```
+
+3. **web-installer/index.html** - Version badge in UI
+   ```html
+   <span class="version-badge">v0.6.1</span>
+   ```
+
+Then build and copy firmware:
+```bash
+source ~/esp/esp-idf/export.sh && source ~/esp/esp-matter/export.sh
+idf.py build
+./web-installer/copy-firmware.sh
+```
+
 ## Project Structure
 ```
 ~/dev/noscope.TLED/
@@ -135,18 +161,7 @@ app_driver_light_set_hsv_with_transition(handle, hue, sat, transition_ms);
 app_driver_light_set_effect(handle, effect_id);
 ```
 
-## Phase Progress
-
-| Phase | Status | Description |
-|-------|--------|-------------|
-| 1 | ✅ Done | Basic on/off light over Matter+Thread |
-| 2 | ✅ Done | RGB color, brightness, NVS persistence |
-| 3 | ✅ Done | Smooth transitions & effects |
-| 4 | ✅ Done | Kconfig + NVS config system |
-| 4b | ✅ Done | Web installer + serial config + device branding |
-| 5 | ⏳ | OTA updates, watchdog, safety features |
-
-### v0.6.0 Features (Phase 5 In Progress)
+### v0.6.0 Features
 - Health monitoring: heap usage, temperature logging every 60s
 - Watchdog timer with panic reboot (configurable timeout)
 - Power-on behavior: restore/on/off modes
@@ -154,7 +169,7 @@ app_driver_light_set_effect(handle, effect_id);
 - Temperature Measurement cluster: exposes chip temp to Home Assistant (endpoint 2)
 - OTA infrastructure ready (JSON metadata, OTA image creation)
 
-### v0.5.0 Features (Phase 4b Complete)
+### v0.5.0 Features
 - Custom device branding: Shows "TLED" / "Matter LED Controller" in Home Assistant
 - Unique BLE UUIDs (not hardcoded test values)
 - Web installer with QR code display, serial console, help documentation
@@ -224,18 +239,6 @@ idf.py build
 | `CONFIG_TLED_LED_*` | WS2812B | LED chipset |
 | `CONFIG_TLED_RGB_ORDER_*` | GRB | Color order |
 | `CONFIG_TLED_DEFAULT_TRANSITION_MS` | 300 | Fade time |
-
-## Next Steps (Phase 5)
-1. ✅ Web installer page with ESP Web Tools
-2. ✅ GitHub Actions workflow for Pages deployment
-3. ✅ Serial configuration interface
-4. ✅ Custom device branding (DeviceInstanceInfoProvider)
-5. ⚠️ OTA updates via Matter - **blocked by ESP-Matter bug** (see Known Issues)
-6. ✅ Watchdog timer and crash recovery
-7. ✅ Thermal monitoring and safety features
-8. ✅ Power-on behavior settings
-9. ⏳ TLED enclosure design
-10. ✅ Temperature Measurement cluster (expose chip temp to Home Assistant)
 
 ## Known Issues / Notes
 - First commission after erase-flash may take a moment

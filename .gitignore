@@ -24,5 +24,10 @@ Thumbs.db
 # Web installer firmware variants (built locally for variants)
 web-installer/firmware-*/
 
+# Local tool config
+.agents/
+.claude/
+.openscad-mcp/
+
 # Secrets
 .env

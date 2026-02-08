@@ -8,15 +8,13 @@ if(NOT DEFINED ENV{ESP_MATTER_PATH})
 endif(NOT DEFINED ENV{ESP_MATTER_PATH})
 
 if(NOT DEFINED ENV{ESP_MATTER_DEVICE_PATH})
-    if("${IDF_TARGET}" STREQUAL "esp32c6")
-        set(ENV{ESP_MATTER_DEVICE_PATH} $ENV{ESP_MATTER_PATH}/device_hal/device/esp32c6_devkit_c)
-    else()
-        message(FATAL_ERROR "TLED only supports ESP32-C6")
-    endif()
+    # Use our custom device cmake that excludes esp-matter's led_driver
+    # (TLED has its own LED driver with SK6812 RGBW support)
+    set(ENV{ESP_MATTER_DEVICE_PATH} ${CMAKE_SOURCE_DIR}/device)
 endif(NOT DEFINED ENV{ESP_MATTER_DEVICE_PATH})
 
-set(PROJECT_VER "0.6.2")
-set(PROJECT_VER_NUMBER 8)
+set(PROJECT_VER "0.7.0")
+set(PROJECT_VER_NUMBER 9)
 
 set(ESP_MATTER_PATH $ENV{ESP_MATTER_PATH})
 set(MATTER_SDK_PATH ${ESP_MATTER_PATH}/connectedhomeip/connectedhomeip)
@@ -30,7 +28,6 @@ set(EXTRA_COMPONENT_DIRS
     "${ESP_MATTER_PATH}/examples/common"
     "${MATTER_SDK_PATH}/config/esp32/components"
     "${ESP_MATTER_PATH}/components"
-    "${ESP_MATTER_PATH}/device_hal/device"
     ${extra_components_dirs_append})
 
 project(tled)
