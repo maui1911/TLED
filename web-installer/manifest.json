@@ -1,6 +1,6 @@
 {
   "name": "TLED - Matter LED Controller",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "home_assistant_domain": "matter",
   "funding_url": "https://github.com/sponsors/your-username",
   "new_install_prompt_erase": true,
