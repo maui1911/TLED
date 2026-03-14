@@ -67,30 +67,17 @@ https://project-chip.github.io/connectedhomeip/qrcode.html?data=MT%3AY.K9042C00K
 ```
 
 ### Releasing a New Version
-When releasing a new version, update these files:
-
-1. **CMakeLists.txt** - Firmware version (shown in logs)
-   ```cmake
-   set(PROJECT_VER "0.6.1")
-   set(PROJECT_VER_NUMBER 7)  # Increment for OTA comparison
-   ```
-
-2. **web-installer/manifest.json** - Web installer version
-   ```json
-   "version": "0.6.1",
-   ```
-
-3. **web-installer/index.html** - Version badge in UI
-   ```html
-   <span class="version-badge">v0.6.1</span>
-   ```
-
-Then build and copy firmware:
+Use the release script — it handles version bumps, build, firmware copy, commit, tag, push, and GitHub release in one command:
 ```bash
-source ~/esp/esp-idf/export.sh && source ~/esp/esp-matter/export.sh
-idf.py build
-./web-installer/copy-firmware.sh
+./release.sh 0.8.0
 ```
+
+The script will:
+1. Verify you're on `main` and pull latest
+2. Update version in `CMakeLists.txt`, `manifest.json`, and `index.html`
+3. Build firmware and copy to `web-installer/firmware/`
+4. Commit, tag, and push
+5. Create GitHub release with `tled.bin` attached
 
 ## Project Structure
 ```
