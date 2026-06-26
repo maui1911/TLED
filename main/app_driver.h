@@ -186,6 +186,22 @@ esp_err_t app_driver_light_set_hsv_with_transition(app_driver_handle_t handle,
                                                     uint32_t transition_ms);
 
 /**
+ * @brief Set color temperature with a custom transition time
+ *
+ * Converts the color temperature (in mireds) to an RGB white point and drives
+ * it through the HSV transition engine. On SK6812 RGBW strips the white
+ * component is routed to the dedicated W channel via the configured white mode.
+ *
+ * @param handle Driver handle
+ * @param mireds Color temperature in mireds (1,000,000 / Kelvin)
+ * @param transition_ms Transition duration in milliseconds (0 = immediate)
+ * @return ESP_OK on success
+ */
+esp_err_t app_driver_light_set_color_temperature_with_transition(app_driver_handle_t handle,
+                                                                 uint16_t mireds,
+                                                                 uint32_t transition_ms);
+
+/**
  * @brief Set an effect mode
  *
  * @param handle Driver handle

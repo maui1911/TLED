@@ -57,6 +57,7 @@ typedef struct {
     uint8_t gain_g;             // Green channel gain (0-255)
     uint8_t gain_b;             // Blue channel gain (0-255)
     uint8_t gain_w;             // White channel gain (0-255)
+    uint16_t white_led_kelvin;  // Native color temp of the SK6812 W LED (K)
     char device_name[32];       // Custom device name
     uint8_t config_version;     // Config version for migration
     bool configured;            // True if config has been set
@@ -102,7 +103,8 @@ typedef struct {
 #define TLED_DEFAULT_WHITE_MODE     WHITE_MODE_ACCURATE
 #define TLED_DEFAULT_MANUAL_WHITE   0
 #define TLED_DEFAULT_CHANNEL_GAIN   255
-#define TLED_CONFIG_VERSION         3  // Bumped for RGBW white mixing and gains
+#define TLED_DEFAULT_WHITE_LED_KELVIN 4000  // Neutral-white SK6812 default
+#define TLED_CONFIG_VERSION         4  // Bumped for white LED color temperature
 
 /**
  * @brief Initialize the config module

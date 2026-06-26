@@ -42,6 +42,7 @@ static void set_defaults(tled_config_t *config)
     config->gain_g = TLED_DEFAULT_CHANNEL_GAIN;
     config->gain_b = TLED_DEFAULT_CHANNEL_GAIN;
     config->gain_w = TLED_DEFAULT_CHANNEL_GAIN;
+    config->white_led_kelvin = TLED_DEFAULT_WHITE_LED_KELVIN;
     strncpy(config->device_name, TLED_DEFAULT_DEVICE_NAME, sizeof(config->device_name) - 1);
     config->device_name[sizeof(config->device_name) - 1] = '\0';
     config->config_version = TLED_CONFIG_VERSION;
@@ -69,6 +70,48 @@ static void migrate_v2_config(const tled_config_v2_t *old_config, tled_config_t 
     new_config->chipset = old_config->chipset;
     new_config->max_brightness = old_config->max_brightness;
     new_config->power_on_behavior = old_config->power_on_behavior;
+    strncpy(new_config->device_name, old_config->device_name, sizeof(new_config->device_name) - 1);
+    new_config->device_name[sizeof(new_config->device_name) - 1] = '\0';
+    new_config->configured = old_config->configured;
+    new_config->config_version = TLED_CONFIG_VERSION;
+}
+
+// v3 layout: tled_config_t before the white_led_kelvin field was added.
+#define TLED_CONFIG_VERSION_RGBW 3
+typedef struct {
+    uint16_t num_leds;
+    uint8_t gpio_pin;
+    uint8_t rgb_order;
+    uint8_t chipset;
+    uint8_t max_brightness;
+    uint8_t power_on_behavior;
+    uint8_t white_mode;
+    uint8_t manual_white;
+    uint8_t gain_r;
+    uint8_t gain_g;
+    uint8_t gain_b;
+    uint8_t gain_w;
+    char device_name[32];
+    uint8_t config_version;
+    bool configured;
+} tled_config_v3_t;
+
+static void migrate_v3_config(const tled_config_v3_t *old_config, tled_config_t *new_config)
+{
+    set_defaults(new_config);
+    new_config->num_leds = old_config->num_leds;
+    new_config->gpio_pin = old_config->gpio_pin;
+    new_config->rgb_order = old_config->rgb_order;
+    new_config->chipset = old_config->chipset;
+    new_config->max_brightness = old_config->max_brightness;
+    new_config->power_on_behavior = old_config->power_on_behavior;
+    new_config->white_mode = old_config->white_mode;
+    new_config->manual_white = old_config->manual_white;
+    new_config->gain_r = old_config->gain_r;
+    new_config->gain_g = old_config->gain_g;
+    new_config->gain_b = old_config->gain_b;
+    new_config->gain_w = old_config->gain_w;
+    // white_led_kelvin stays at its default (set_defaults)
     strncpy(new_config->device_name, old_config->device_name, sizeof(new_config->device_name) - 1);
     new_config->device_name[sizeof(new_config->device_name) - 1] = '\0';
     new_config->configured = old_config->configured;
@@ -111,6 +154,12 @@ static bool validate_config(const tled_config_t *config)
     // Check RGBW white mode
     if (config->white_mode > WHITE_MODE_MAX) {
         ESP_LOGW(TAG, "Invalid white mode: %d", config->white_mode);
+        return false;
+    }
+
+    // Check white LED color temperature (plausible LED range)
+    if (config->white_led_kelvin < 1000 || config->white_led_kelvin > 20000) {
+        ESP_LOGW(TAG, "Invalid white LED kelvin: %d", config->white_led_kelvin);
         return false;
     }
 
@@ -181,6 +230,22 @@ esp_err_t tled_config_init(void)
                 }
             }
             ESP_LOGW(TAG, "Failed to migrate config blob, using defaults");
+            set_defaults(&s_config);
+        } else if (err == ESP_OK && size == sizeof(tled_config_v3_t)) {
+            tled_config_v3_t old_config;
+            err = nvs_get_blob(handle, NVS_KEY_CONFIG, &old_config, &size);
+            if (err == ESP_OK && old_config.config_version == TLED_CONFIG_VERSION_RGBW) {
+                migrate_v3_config(&old_config, &s_config);
+                if (validate_config(&s_config)) {
+                    nvs_close(handle);
+                    ESP_LOGI(TAG, "Migrated v3 config: %d LEDs, GPIO%d, white_mode=%d, white_led=%dK",
+                             s_config.num_leds, s_config.gpio_pin, s_config.white_mode,
+                             s_config.white_led_kelvin);
+                    s_initialized = true;
+                    return ESP_OK;
+                }
+            }
+            ESP_LOGW(TAG, "Failed to migrate v3 config blob, using defaults");
             set_defaults(&s_config);
         } else {
             ESP_LOGW(TAG, "Failed to load config blob, using defaults");
