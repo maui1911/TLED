@@ -31,6 +31,7 @@
 // 153 mireds = 6500K (cool white), 333 mireds = 3000K (warm white)
 #define TLED_CT_MIN_MIREDS      153
 #define TLED_CT_MAX_MIREDS      333
+#define TLED_RGBW_CT_MAX_MIREDS 500     // 2000K, SK6812 can mix below its W LED temperature
 #define TLED_DEFAULT_CT_MIREDS  250     // ~4000K neutral
 
 // Transition settings

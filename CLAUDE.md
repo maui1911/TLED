@@ -34,6 +34,7 @@ ESP32-C6 based LED controller using Matter protocol over Thread network. Like WL
 ### Build & Flash
 ```bash
 # Source environment
+# Requires ESP-IDF v5.4.1 and esp-matter at commit 1f50e4e
 source ~/esp/esp-idf/export.sh && source ~/esp/esp-matter/export.sh
 
 # Build
@@ -111,14 +112,15 @@ The script will:
 ### Matter Device Type
 Using `dimmable_light` as base + manually added ColorControl cluster with the HSV feature.
 XY mode is not added (it caused issues with Home Assistant). ColorTemperature is added
-conditionally — only when the chipset is WS2805, which has dedicated warm/cool white channels.
+conditionally — only when the chipset has a white source (WS2805 or SK6812).
 
 ### Color Control
 - HSV mode (no XY)
 - Hue: 0-254 (Matter range) → 0-360 degrees
 - Saturation: 0-254 → 0-100%
 - Brightness via LevelControl cluster: 0-254
-- On WS2805 strips only: ColorTemperature feature added (153-333 mireds ≈ 6500K-3000K)
+- ColorTemperature feature on WS2805 (153-333 mireds ≈ 6500K-3000K) and SK6812 (153-500 mireds ≈ 6500K-2000K)
+- SK6812 CT mixing is white-primary (`ct_to_rgbw_full`), based on the W LED temperature from `set white_temp`
 
 ### WS2805 (RGBCCT) Support
 - 5 channels per IC: R, G, B, W1 (warm), W2 (cool); one IC drives a group of ~6 LEDs, so `leds` = IC count
@@ -127,7 +129,7 @@ conditionally — only when the chipset is WS2805, which has dedicated warm/cool
 - Optional BIN (DIN2 backup) line: the DIN waveform is mirrored to a second GPIO via the GPIO matrix (`set bin <pin>`)
 - `set white_order ww_cw|cw_ww` swaps warm/cool if the strip is wired the other way
 - CT mode drives WW/CW only (RGB off); color mode drives RGB only (whites off); blended mode not implemented
-- Switching type to/from ws2805 changes cluster shape → device must be re-commissioned
+- Switching between a type with a white source (ws2805, sk6812) and one without changes cluster shape → device must be re-commissioned
 
 ### NVS Persistence
 Saves to `tled_state` namespace:
@@ -252,4 +254,4 @@ idf.py build
 - ESP-IDF: v5.4.1
 - ESP-Matter: main branch
 - Target: ESP32-C6
-- Matter Device Type: Dimmable Light + Color Control (HSV)
+- Matter Device Type: Dimmable Light + Color Control (HSV, plus CT on WS2805/SK6812)

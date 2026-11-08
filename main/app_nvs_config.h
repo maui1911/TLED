@@ -70,6 +70,7 @@ typedef struct {
     uint8_t gain_w;             // White channel gain (0-255)
     uint8_t bin_gpio;           // WS2805 backup data GPIO (TLED_BIN_GPIO_DISABLED = off)
     uint8_t white_order;        // WS2805 white channel order (tled_white_order_t)
+    uint16_t white_led_kelvin;  // Native color temp of the SK6812 W LED (K)
     char device_name[32];       // Custom device name
     uint8_t config_version;     // Config version for migration
     bool configured;            // True if config has been set
@@ -125,7 +126,8 @@ typedef struct {
 #define TLED_DEFAULT_MANUAL_WHITE   0
 #define TLED_DEFAULT_CHANNEL_GAIN   255
 #define TLED_DEFAULT_WHITE_ORDER    WHITE_ORDER_WW_CW
-#define TLED_CONFIG_VERSION         4  // Bumped for WS2805 (bin_gpio, white_order)
+#define TLED_DEFAULT_WHITE_LED_KELVIN 4000  // Neutral-white SK6812 default
+#define TLED_CONFIG_VERSION         5  // Bumped for white LED color temperature
 
 /**
  * @brief Initialize the config module

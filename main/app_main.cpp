@@ -129,31 +129,77 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
 {
     switch (event->Type) {
     case chip::DeviceLayer::DeviceEventType::kInterfaceIpAddressChanged:
-        ESP_LOGI(TAG, "Interface IP Address changed");
+        ESP_LOGI(TAG, "[Commissioning] Interface IP Address changed");
         break;
 
     case chip::DeviceLayer::DeviceEventType::kCommissioningComplete:
-        ESP_LOGI(TAG, "Commissioning complete");
+        ESP_LOGI(TAG, "[Commissioning] Complete - device is now on the fabric");
         break;
 
     case chip::DeviceLayer::DeviceEventType::kFailSafeTimerExpired:
-        ESP_LOGI(TAG, "Commissioning failed, fail safe timer expired");
+        ESP_LOGW(TAG, "[Commissioning] FailSafe timer expired - commissioning rolled back");
+        ESP_LOGW(TAG, "[Commissioning] This usually means Thread attach or SRP registration took >60s");
         break;
 
     case chip::DeviceLayer::DeviceEventType::kCommissioningSessionStarted:
-        ESP_LOGI(TAG, "Commissioning session started");
+        ESP_LOGI(TAG, "[Commissioning] PASE session started (BLE)");
         break;
 
     case chip::DeviceLayer::DeviceEventType::kCommissioningSessionStopped:
-        ESP_LOGI(TAG, "Commissioning session stopped");
+        ESP_LOGI(TAG, "[Commissioning] PASE session stopped");
         break;
 
     case chip::DeviceLayer::DeviceEventType::kCommissioningWindowOpened:
-        ESP_LOGI(TAG, "Commissioning window opened");
+        ESP_LOGI(TAG, "[Commissioning] Window opened - device discoverable");
         break;
 
     case chip::DeviceLayer::DeviceEventType::kCommissioningWindowClosed:
-        ESP_LOGI(TAG, "Commissioning window closed");
+        ESP_LOGI(TAG, "[Commissioning] Window closed");
+        break;
+
+    case chip::DeviceLayer::DeviceEventType::kCHIPoBLEAdvertisingChange:
+        ESP_LOGI(TAG, "[BLE] Advertising %s",
+                 event->CHIPoBLEAdvertisingChange.Result == chip::DeviceLayer::kActivity_Started ? "started" :
+                 event->CHIPoBLEAdvertisingChange.Result == chip::DeviceLayer::kActivity_Stopped ? "stopped" : "unchanged");
+        break;
+
+    case chip::DeviceLayer::DeviceEventType::kCHIPoBLEConnectionEstablished:
+        ESP_LOGI(TAG, "[BLE] Connection established - commissioner connected");
+        break;
+
+    case chip::DeviceLayer::DeviceEventType::kCHIPoBLEConnectionClosed:
+        ESP_LOGI(TAG, "[BLE] Connection closed");
+        break;
+
+    case chip::DeviceLayer::DeviceEventType::kThreadStateChange: {
+        const auto &ts = event->ThreadStateChange;
+        ESP_LOGI(TAG, "[Thread] State change:%s%s%s%s",
+                 ts.RoleChanged ? " role" : "",
+                 ts.AddressChanged ? " address" : "",
+                 ts.NetDataChanged ? " netdata" : "",
+                 ts.ChildNodesChanged ? " children" : "");
+        break;
+    }
+
+    case chip::DeviceLayer::DeviceEventType::kThreadConnectivityChange:
+        switch (event->ThreadConnectivityChange.Result) {
+        case chip::DeviceLayer::kConnectivity_Established:
+            ESP_LOGI(TAG, "[Thread] Connectivity ESTABLISHED - attached to Thread network");
+            break;
+        case chip::DeviceLayer::kConnectivity_Lost:
+            ESP_LOGW(TAG, "[Thread] Connectivity LOST - detached from Thread network");
+            break;
+        default:
+            break;
+        }
+        break;
+
+    case chip::DeviceLayer::DeviceEventType::kDnssdInitialized:
+        ESP_LOGI(TAG, "[DNS-SD] Initialized - operational advertisement will start once on Thread");
+        break;
+
+    case chip::DeviceLayer::DeviceEventType::kServerReady:
+        ESP_LOGI(TAG, "[Matter] Server ready");
         break;
 
     case chip::DeviceLayer::DeviceEventType::kFabricRemoved:
@@ -297,12 +343,18 @@ extern "C" void app_main()
     endpoint_t *endpoint = dimmable_light::create(node, &light_config, ENDPOINT_FLAG_NONE, light_handle);
     ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create dimmable light endpoint"));
 
-    /* Add ColorControl cluster with HSV feature (plus ColorTemperature on WS2805) */
-    bool has_color_temp = (config->chipset == CHIPSET_WS2805);
+    /* Add ColorControl cluster with HSV, plus Color Temperature on strips with a
+     * white source. Matter has no RGBW/white channel concept, so a warm/cool
+     * white control is only reachable through the Color Temperature feature. */
+    bool has_white_source = (config->chipset == CHIPSET_WS2805 || config->chipset == CHIPSET_SK6812);
 
     cluster::color_control::config_t color_config;
     color_config.color_mode = static_cast<uint8_t>(ColorControl::ColorModeEnum::kCurrentHueAndCurrentSaturation);
     color_config.enhanced_color_mode = static_cast<uint8_t>(ColorControl::ColorModeEnum::kCurrentHueAndCurrentSaturation);
+    if (has_white_source) {
+        // ColorCapabilities bitmap: bit0 = Hue/Saturation, bit4 = Color Temperature
+        color_config.color_capabilities = 0x01 | 0x10;
+    }
     cluster_t *color_cluster = cluster::color_control::create(endpoint, &color_config, CLUSTER_FLAG_SERVER);
 
     /* Add HSV feature */
@@ -311,22 +363,23 @@ extern "C" void app_main()
     hs_config.current_saturation = 254;
     cluster::color_control::feature::hue_saturation::add(color_cluster, &hs_config);
 
-    /* WS2805 has dedicated warm/cool white channels - expose color temperature.
+    /* Expose color temperature on strips with a white source.
      * Note: adding/removing this feature changes the cluster shape, so switching
-     * strip type to/from WS2805 requires re-commissioning the device. */
-    if (has_color_temp) {
+     * strip type to/from one with a white source requires re-commissioning. */
+    if (has_white_source) {
+        uint16_t ct_max_mireds = (config->chipset == CHIPSET_SK6812) ? TLED_RGBW_CT_MAX_MIREDS : TLED_CT_MAX_MIREDS;
         cluster::color_control::feature::color_temperature::config_t ct_config;
         ct_config.color_temperature_mireds = TLED_DEFAULT_CT_MIREDS;
-        ct_config.color_temp_physical_min_mireds = TLED_CT_MIN_MIREDS;  // 6500K cool
-        ct_config.color_temp_physical_max_mireds = TLED_CT_MAX_MIREDS;  // 3000K warm
+        ct_config.color_temp_physical_min_mireds = TLED_CT_MIN_MIREDS;
+        ct_config.color_temp_physical_max_mireds = ct_max_mireds;
         ct_config.couple_color_temp_to_level_min_mireds = TLED_CT_MIN_MIREDS;
-        ct_config.start_up_color_temperature_mireds = nullable<uint16_t>(TLED_DEFAULT_CT_MIREDS);
+        ct_config.start_up_color_temperature_mireds = nullable<uint16_t>();  // null = use last value
         cluster::color_control::feature::color_temperature::add(color_cluster, &ct_config);
     }
 
     light_endpoint_id = endpoint::get_id(endpoint);
     ESP_LOGI(TAG, "Color Light (HSV%s) created with endpoint_id %d",
-             has_color_temp ? "+CT" : "", light_endpoint_id);
+             has_white_source ? " + CT" : "", light_endpoint_id);
 
     /* Create Temperature Sensor endpoint to expose chip temperature */
     temperature_sensor::config_t temp_config;

@@ -181,6 +181,7 @@ static void print_help(void) {
     serial_write("  set gain_g <n>    - Green channel gain (0-255)\r\n");
     serial_write("  set gain_b <n>    - Blue channel gain (0-255)\r\n");
     serial_write("  set gain_w <n>    - White channel gain (0-255)\r\n");
+    serial_write("  set white_temp <k> - SK6812 white LED color temp in Kelvin (1000-20000)\r\n");
     serial_write("  save              - Save config and reboot\r\n");
     serial_write("  reboot            - Reboot without saving\r\n");
     serial_write("  factory           - Reset to factory defaults\r\n");
@@ -234,6 +235,7 @@ static void print_config(void) {
         serial_printf("  bin        = %d\r\n", cfg->bin_gpio);
     }
     serial_printf("  white_order = %s\r\n", cfg->white_order == WHITE_ORDER_CW_WW ? "cw_ww" : "ww_cw");
+    serial_printf("  white_temp = %dK\r\n", cfg->white_led_kelvin);
     serial_printf("  name       = %s\r\n", cfg->device_name);
     serial_write("\r\n");
 }
@@ -422,6 +424,16 @@ static void handle_set_command(const char *param, const char *value) {
             cfg->gain_w = n;
         }
         serial_printf("Set %s = %d\r\n", param, n);
+    }
+    else if (strcmp(param, "white_temp") == 0) {
+        char *end = NULL;
+        long kelvin = strtol(value, &end, 10);
+        if (end == value || *end != '\0' || kelvin < 1000 || kelvin > 20000) {
+            serial_write("Error: white_temp must be 1000-20000 (Kelvin)\r\n");
+            return;
+        }
+        cfg->white_led_kelvin = (uint16_t)kelvin;
+        serial_printf("Set white_temp = %ldK\r\n", kelvin);
     }
     else {
         serial_printf("Unknown parameter: %s\r\n", param);

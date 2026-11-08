@@ -219,10 +219,10 @@ esp_err_t app_driver_light_set_hsv_with_transition(app_driver_handle_t handle,
                                                     uint32_t transition_ms);
 
 /**
- * @brief Set color temperature (WS2805 white channels)
+ * @brief Set color temperature
  *
- * Switches the light to color temperature mode: warm/cool white channels are
- * driven and RGB is turned off. Only effective on WS2805 strips.
+ * Switches the light to color temperature mode. WS2805 drives its warm/cool
+ * white channels; SK6812 mixes its W LED with RGB (see white_temp config).
  *
  * @param handle Driver handle
  * @param mireds Color temperature in mireds (clamped to TLED_CT_MIN/MAX_MIREDS)

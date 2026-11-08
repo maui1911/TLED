@@ -8,6 +8,7 @@ A Matter-compatible LED strip controller for ESP32-C6 that works over Thread net
 
 - **Matter over Thread** - Native Matter protocol, no cloud or WiFi required
 - **Full RGB + RGBW control** - Color picker, brightness, on/off from your smart home app
+- **Tunable white on SK6812 RGBW** - Warm/cool white (2000K-6500K) via a native color temperature control, using the W LED as the main white source
 - **RGBCCT (WS2805) support** - Tunable white (3000K-6500K) via a native color temperature slider, plus full RGB color
 - **Smooth transitions** - 300ms fades on all changes
 - **Thread mesh networking** - Self-healing network, device acts as a router
@@ -89,6 +90,7 @@ After reboot, a QR code will appear in the web installer. Scan it with:
 | Channel Gains | 255 | Per-channel RGBW calibration gain (0-255) |
 | BIN GPIO | off | WS2805 only: optional GPIO for the BIN backup data line |
 | White Order | ww_cw | WS2805 only: which wire channel is warm vs cool white |
+| White Temp | 4000K | SK6812 only: color temperature of the strip's W LED, used for white mixing |
 | Device Name | TLED | Name shown in your smart home app |
 | Power-on | restore | Behavior on power up: restore last state, on, or off |
 
@@ -134,6 +136,7 @@ set type <type>         Set LED type (ws2812b/ws2811/sk6812/ws2805)
 set order <order>       Set RGB order (grb/rgb/brg/rbg/bgr/gbr)
 set bin <n|off>         WS2805 BIN backup data GPIO (off = disabled)
 set white_order <o>     WS2805 white channel order (ww_cw/cw_ww)
+set white_temp <k>      SK6812 W LED color temperature in Kelvin (1000-20000)
 set brightness <1-255>  Set max brightness
 set name <name>         Set device name
 set poweron <mode>      Power-on behavior (restore/on/off)
@@ -158,9 +161,13 @@ To match an existing WLED installation, compare these settings first:
 - **RGB order:** use `set order grb|rgb|brg|rbg|bgr|gbr` until red, green, and blue match.
 - **Brightness limiter:** match WLED's current limit with `set brightness <1-255>`, or leave both unlimited for calibration.
 - **White, gamma, and correction:** TLED applies only manual white and linear per-channel gains; disable WLED color correction/gamma while matching, or compensate with `gain_r`, `gain_g`, `gain_b`, and `gain_w`.
-- **Matter capability changes:** if a firmware update changes exposed Matter capabilities, remove and re-pair the device in your Matter controller after flashing.
+- **Matter capability changes:** if a firmware update changes exposed Matter capabilities, Home Assistant keeps the old ones until you run **Re-interview device** and then reload the Matter integration. Other controllers may need the device removed and re-paired.
 
-For SK6812 RGBW strips, TLED does not expose Matter Color Temperature - white mixing stays in firmware configuration and the Matter endpoint is HSV/RGB plus brightness only.
+### SK6812 color temperature
+
+Matter has no RGBW channel, so TLED exposes the W LED through a native Matter **Color Temperature** control (153-500 mireds ≈ 6500K-2000K) alongside the color picker. The W LED is the main white source and RGB only fills in what it cannot reach, so output is pure W at the strip's native temperature. Tell TLED what that is with `set white_temp <kelvin>`; warm white strips are typically around 3000K, cool white around 6000K.
+
+The `white_mode`, `white` and gain settings apply to color mode; the channel gains and brightness limit apply in color temperature mode too.
 
 ### WS2805 color temperature
 
@@ -169,14 +176,14 @@ WS2805 strips have dedicated warm (3000K) and cool (6500K) white channels, so TL
 - **White/CT mode:** the warm and cool channels are mixed to hit the requested temperature; RGB stays off.
 - **Color mode:** RGB renders the chosen color; the white channels stay off.
 
-> **Note:** switching the LED type to or from `ws2805` changes the device's Matter clusters. Remove and re-add the device in your smart home app after changing it.
+> **Note:** switching between a strip with a white source (`sk6812`, `ws2805`) and one without changes the device's Matter clusters. Remove and re-add the device in your smart home app after changing it.
 
 ## Building from Source
 
 ### Prerequisites
 
-- [ESP-IDF v5.4+](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/get-started/)
-- [ESP-Matter](https://github.com/espressif/esp-matter)
+- [ESP-IDF v5.4.1](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/get-started/)
+- [ESP-Matter](https://github.com/espressif/esp-matter) at commit `1f50e4e` (main, February 2026). Older releases such as `release/v1.4.2` do not build: the color temperature API differs.
 
 ### Build & Flash
 
