@@ -135,6 +135,8 @@ static void process_command(const char *cmd) {
             serial_write("Rebooting in 2 seconds...\r\n");
             vTaskDelay(pdMS_TO_TICKS(2000));
             esp_restart();
+        } else if (err == ESP_ERR_INVALID_ARG) {
+            serial_write("Error: current config is invalid, not saved (check 'show')\r\n");
         } else {
             serial_printf("Error saving config: %s\r\n", esp_err_to_name(err));
         }
@@ -167,8 +169,10 @@ static void print_help(void) {
     serial_write("  set leds <n>      - Set number of LEDs (1-1000)\r\n");
     serial_write("  set gpio <n>      - Set data GPIO pin (0-21)\r\n");
     serial_write("  set brightness <n> - Set max brightness (1-255)\r\n");
-    serial_write("  set type <t>      - Set LED type: ws2812b, ws2811, sk6812\r\n");
+    serial_write("  set type <t>      - Set LED type: ws2812b, ws2811, sk6812, ws2805\r\n");
     serial_write("  set order <o>     - Set RGB order: grb, rgb, brg, rbg, bgr, gbr\r\n");
+    serial_write("  set bin <n|off>   - WS2805 BIN backup data GPIO (off = disabled)\r\n");
+    serial_write("  set white_order <o> - WS2805 white channels: ww_cw, cw_ww\r\n");
     serial_write("  set name <name>   - Set device name\r\n");
     serial_write("  set poweron <m>   - Power-on behavior: restore, on, off\r\n");
     serial_write("  set white_mode <m> - RGBW white mode: accurate, brighter, none, dual, max\r\n");
@@ -189,9 +193,10 @@ static void print_config(void) {
 
     const char *type_str = "unknown";
     switch (cfg->chipset) {
-        case 0: type_str = "ws2812b"; break;
-        case 1: type_str = "ws2811"; break;
-        case 2: type_str = "sk6812"; break;
+        case CHIPSET_WS2812B: type_str = "ws2812b"; break;
+        case CHIPSET_WS2811: type_str = "ws2811"; break;
+        case CHIPSET_SK6812: type_str = "sk6812"; break;
+        case CHIPSET_WS2805: type_str = "ws2805"; break;
     }
 
     const char *order_str = "unknown";
@@ -224,6 +229,12 @@ static void print_config(void) {
     serial_printf("  gain_g     = %d\r\n", cfg->gain_g);
     serial_printf("  gain_b     = %d\r\n", cfg->gain_b);
     serial_printf("  gain_w     = %d\r\n", cfg->gain_w);
+    if (cfg->bin_gpio == TLED_BIN_GPIO_DISABLED) {
+        serial_write("  bin        = off\r\n");
+    } else {
+        serial_printf("  bin        = %d\r\n", cfg->bin_gpio);
+    }
+    serial_printf("  white_order = %s\r\n", cfg->white_order == WHITE_ORDER_CW_WW ? "cw_ww" : "ww_cw");
     serial_printf("  white_temp = %dK\r\n", cfg->white_led_kelvin);
     serial_printf("  name       = %s\r\n", cfg->device_name);
     serial_write("\r\n");
@@ -264,11 +275,13 @@ static void handle_set_command(const char *param, const char *value) {
     }
     else if (strcmp(param, "gpio") == 0) {
         int n = atoi(value);
-        if (tled_config_validate_gpio((uint8_t)n)) {
+        if (!tled_config_validate_gpio((uint8_t)n)) {
+            serial_write("Error: invalid GPIO pin (avoid 9, 12-13, 15)\r\n");
+        } else if (cfg->bin_gpio != TLED_BIN_GPIO_DISABLED && (uint8_t)n == cfg->bin_gpio) {
+            serial_printf("Error: GPIO %d is already used as BIN pin (run 'set bin off' first)\r\n", n);
+        } else {
             cfg->gpio_pin = n;
             serial_printf("Set gpio = %d\r\n", n);
-        } else {
-            serial_write("Error: invalid GPIO pin (avoid 9, 12-13, 15)\r\n");
         }
     }
     else if (strcmp(param, "brightness") == 0) {
@@ -282,16 +295,48 @@ static void handle_set_command(const char *param, const char *value) {
     }
     else if (strcmp(param, "type") == 0) {
         if (strcmp(value, "ws2812b") == 0) {
-            cfg->chipset = 0;
+            cfg->chipset = CHIPSET_WS2812B;
             serial_write("Set type = ws2812b\r\n");
         } else if (strcmp(value, "ws2811") == 0) {
-            cfg->chipset = 1;
+            cfg->chipset = CHIPSET_WS2811;
             serial_write("Set type = ws2811\r\n");
         } else if (strcmp(value, "sk6812") == 0) {
-            cfg->chipset = 2;
+            cfg->chipset = CHIPSET_SK6812;
             serial_write("Set type = sk6812\r\n");
+        } else if (strcmp(value, "ws2805") == 0) {
+            cfg->chipset = CHIPSET_WS2805;
+            serial_write("Set type = ws2805 (RGB + warm/cool white)\r\n");
+            serial_write("Note: switching to/from ws2805 changes the Matter clusters -\r\n");
+            serial_write("      remove and re-add the device in your smart home app.\r\n");
         } else {
-            serial_write("Error: type must be ws2812b, ws2811, or sk6812\r\n");
+            serial_write("Error: type must be ws2812b, ws2811, sk6812, or ws2805\r\n");
+        }
+    }
+    else if (strcmp(param, "bin") == 0) {
+        if (strcmp(value, "off") == 0) {
+            cfg->bin_gpio = TLED_BIN_GPIO_DISABLED;
+            serial_write("Set bin = off (BIN backup line disabled)\r\n");
+        } else {
+            uint8_t n;
+            if (!parse_u8_value(value, &n)) {
+                serial_write("Error: bin must be a GPIO number or 'off'\r\n");
+            } else if (tled_config_validate_gpio(n) && n != cfg->gpio_pin) {
+                cfg->bin_gpio = n;
+                serial_printf("Set bin = %d\r\n", n);
+            } else {
+                serial_write("Error: invalid BIN GPIO (avoid 9, 12-13, 15 and the data pin)\r\n");
+            }
+        }
+    }
+    else if (strcmp(param, "white_order") == 0) {
+        if (strcmp(value, "ww_cw") == 0) {
+            cfg->white_order = WHITE_ORDER_WW_CW;
+            serial_write("Set white_order = ww_cw (W1 = warm, W2 = cool)\r\n");
+        } else if (strcmp(value, "cw_ww") == 0) {
+            cfg->white_order = WHITE_ORDER_CW_WW;
+            serial_write("Set white_order = cw_ww (W1 = cool, W2 = warm)\r\n");
+        } else {
+            serial_write("Error: white_order must be ww_cw or cw_ww\r\n");
         }
     }
     else if (strcmp(param, "order") == 0) {

@@ -16,6 +16,8 @@ static const char *TAG = "tled_config";
 #define NVS_NAMESPACE "tled_cfg"
 #define NVS_KEY_CONFIG "config"
 #define TLED_CONFIG_VERSION_POWER_ON 2
+#define TLED_CONFIG_VERSION_RGBW 3
+#define TLED_CONFIG_VERSION_WS2805 4
 
 // Valid GPIO pins for ESP32-C6 LED data output
 // Avoiding: 9 (boot button), 12-13 (USB), 15 (onboard LED)
@@ -42,6 +44,8 @@ static void set_defaults(tled_config_t *config)
     config->gain_g = TLED_DEFAULT_CHANNEL_GAIN;
     config->gain_b = TLED_DEFAULT_CHANNEL_GAIN;
     config->gain_w = TLED_DEFAULT_CHANNEL_GAIN;
+    config->bin_gpio = TLED_DEFAULT_BIN_GPIO;
+    config->white_order = TLED_DEFAULT_WHITE_ORDER;
     config->white_led_kelvin = TLED_DEFAULT_WHITE_LED_KELVIN;
     strncpy(config->device_name, TLED_DEFAULT_DEVICE_NAME, sizeof(config->device_name) - 1);
     config->device_name[sizeof(config->device_name) - 1] = '\0';
@@ -76,8 +80,7 @@ static void migrate_v2_config(const tled_config_v2_t *old_config, tled_config_t 
     new_config->config_version = TLED_CONFIG_VERSION;
 }
 
-// v3 layout: tled_config_t before the white_led_kelvin field was added.
-#define TLED_CONFIG_VERSION_RGBW 3
+// v3 config layout (before WS2805 support added bin_gpio/white_order)
 typedef struct {
     uint16_t num_leds;
     uint8_t gpio_pin;
@@ -111,7 +114,50 @@ static void migrate_v3_config(const tled_config_v3_t *old_config, tled_config_t 
     new_config->gain_g = old_config->gain_g;
     new_config->gain_b = old_config->gain_b;
     new_config->gain_w = old_config->gain_w;
-    // white_led_kelvin stays at its default (set_defaults)
+    strncpy(new_config->device_name, old_config->device_name, sizeof(new_config->device_name) - 1);
+    new_config->device_name[sizeof(new_config->device_name) - 1] = '\0';
+    new_config->configured = old_config->configured;
+    new_config->config_version = TLED_CONFIG_VERSION;
+}
+
+// v4 config layout (before white_led_kelvin was added)
+typedef struct {
+    uint16_t num_leds;
+    uint8_t gpio_pin;
+    uint8_t rgb_order;
+    uint8_t chipset;
+    uint8_t max_brightness;
+    uint8_t power_on_behavior;
+    uint8_t white_mode;
+    uint8_t manual_white;
+    uint8_t gain_r;
+    uint8_t gain_g;
+    uint8_t gain_b;
+    uint8_t gain_w;
+    uint8_t bin_gpio;
+    uint8_t white_order;
+    char device_name[32];
+    uint8_t config_version;
+    bool configured;
+} tled_config_v4_t;
+
+static void migrate_v4_config(const tled_config_v4_t *old_config, tled_config_t *new_config)
+{
+    set_defaults(new_config);
+    new_config->num_leds = old_config->num_leds;
+    new_config->gpio_pin = old_config->gpio_pin;
+    new_config->rgb_order = old_config->rgb_order;
+    new_config->chipset = old_config->chipset;
+    new_config->max_brightness = old_config->max_brightness;
+    new_config->power_on_behavior = old_config->power_on_behavior;
+    new_config->white_mode = old_config->white_mode;
+    new_config->manual_white = old_config->manual_white;
+    new_config->gain_r = old_config->gain_r;
+    new_config->gain_g = old_config->gain_g;
+    new_config->gain_b = old_config->gain_b;
+    new_config->gain_w = old_config->gain_w;
+    new_config->bin_gpio = old_config->bin_gpio;
+    new_config->white_order = old_config->white_order;
     strncpy(new_config->device_name, old_config->device_name, sizeof(new_config->device_name) - 1);
     new_config->device_name[sizeof(new_config->device_name) - 1] = '\0';
     new_config->configured = old_config->configured;
@@ -140,7 +186,7 @@ static bool validate_config(const tled_config_t *config)
     }
 
     // Check chipset
-    if (config->chipset > CHIPSET_SK6812) {
+    if (config->chipset > CHIPSET_WS2805) {
         ESP_LOGW(TAG, "Invalid chipset: %d", config->chipset);
         return false;
     }
@@ -154,6 +200,19 @@ static bool validate_config(const tled_config_t *config)
     // Check RGBW white mode
     if (config->white_mode > WHITE_MODE_MAX) {
         ESP_LOGW(TAG, "Invalid white mode: %d", config->white_mode);
+        return false;
+    }
+
+    // Check WS2805 BIN pin (disabled sentinel, or a valid pin != data pin)
+    if (config->bin_gpio != TLED_BIN_GPIO_DISABLED &&
+        (!tled_config_validate_gpio(config->bin_gpio) || config->bin_gpio == config->gpio_pin)) {
+        ESP_LOGW(TAG, "Invalid BIN GPIO: %d", config->bin_gpio);
+        return false;
+    }
+
+    // Check WS2805 white channel order
+    if (config->white_order > WHITE_ORDER_CW_WW) {
+        ESP_LOGW(TAG, "Invalid white order: %d", config->white_order);
         return false;
     }
 
@@ -215,6 +274,38 @@ esp_err_t tled_config_init(void)
                 ESP_LOGW(TAG, "Loaded config invalid, using defaults");
                 set_defaults(&s_config);
             }
+        } else if (err == ESP_OK && size == sizeof(tled_config_v4_t)) {
+            tled_config_v4_t old_config;
+            err = nvs_get_blob(handle, NVS_KEY_CONFIG, &old_config, &size);
+            if (err == ESP_OK && old_config.config_version == TLED_CONFIG_VERSION_WS2805) {
+                migrate_v4_config(&old_config, &s_config);
+                if (validate_config(&s_config)) {
+                    nvs_close(handle);
+                    ESP_LOGI(TAG, "Migrated v4 config: %d LEDs, GPIO%d, order=%d, chipset=%d, max_bri=%d, name=%s",
+                             s_config.num_leds, s_config.gpio_pin, s_config.rgb_order,
+                             s_config.chipset, s_config.max_brightness, s_config.device_name);
+                    s_initialized = true;
+                    return ESP_OK;
+                }
+            }
+            ESP_LOGW(TAG, "Failed to migrate v4 config blob, using defaults");
+            set_defaults(&s_config);
+        } else if (err == ESP_OK && size == sizeof(tled_config_v3_t)) {
+            tled_config_v3_t old_config;
+            err = nvs_get_blob(handle, NVS_KEY_CONFIG, &old_config, &size);
+            if (err == ESP_OK && old_config.config_version == TLED_CONFIG_VERSION_RGBW) {
+                migrate_v3_config(&old_config, &s_config);
+                if (validate_config(&s_config)) {
+                    nvs_close(handle);
+                    ESP_LOGI(TAG, "Migrated v3 config: %d LEDs, GPIO%d, order=%d, chipset=%d, max_bri=%d, name=%s",
+                             s_config.num_leds, s_config.gpio_pin, s_config.rgb_order,
+                             s_config.chipset, s_config.max_brightness, s_config.device_name);
+                    s_initialized = true;
+                    return ESP_OK;
+                }
+            }
+            ESP_LOGW(TAG, "Failed to migrate v3 config blob, using defaults");
+            set_defaults(&s_config);
         } else if (err == ESP_OK && size == sizeof(tled_config_v2_t)) {
             tled_config_v2_t old_config;
             err = nvs_get_blob(handle, NVS_KEY_CONFIG, &old_config, &size);
@@ -230,22 +321,6 @@ esp_err_t tled_config_init(void)
                 }
             }
             ESP_LOGW(TAG, "Failed to migrate config blob, using defaults");
-            set_defaults(&s_config);
-        } else if (err == ESP_OK && size == sizeof(tled_config_v3_t)) {
-            tled_config_v3_t old_config;
-            err = nvs_get_blob(handle, NVS_KEY_CONFIG, &old_config, &size);
-            if (err == ESP_OK && old_config.config_version == TLED_CONFIG_VERSION_RGBW) {
-                migrate_v3_config(&old_config, &s_config);
-                if (validate_config(&s_config)) {
-                    nvs_close(handle);
-                    ESP_LOGI(TAG, "Migrated v3 config: %d LEDs, GPIO%d, white_mode=%d, white_led=%dK",
-                             s_config.num_leds, s_config.gpio_pin, s_config.white_mode,
-                             s_config.white_led_kelvin);
-                    s_initialized = true;
-                    return ESP_OK;
-                }
-            }
-            ESP_LOGW(TAG, "Failed to migrate v3 config blob, using defaults");
             set_defaults(&s_config);
         } else {
             ESP_LOGW(TAG, "Failed to load config blob, using defaults");
@@ -307,7 +382,7 @@ esp_err_t tled_config_set(uint16_t num_leds, uint8_t gpio_pin, uint8_t rgb_order
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (chipset > CHIPSET_SK6812) {
+    if (chipset > CHIPSET_WS2805) {
         ESP_LOGE(TAG, "Invalid chipset: %d", chipset);
         return ESP_ERR_INVALID_ARG;
     }
@@ -345,6 +420,13 @@ esp_err_t tled_config_save(void)
 {
     if (!s_initialized) {
         return ESP_ERR_INVALID_STATE;
+    }
+
+    // Never persist a config that would be rejected on the next boot -
+    // that would silently reset the device to defaults every restart.
+    if (!validate_config(&s_config)) {
+        ESP_LOGE(TAG, "Refusing to save invalid config");
+        return ESP_ERR_INVALID_ARG;
     }
 
     nvs_handle_t handle;

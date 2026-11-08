@@ -944,6 +944,7 @@
                                 <option value="ws2812b">WS2812B</option>
                                 <option value="ws2811">WS2811</option>
                                 <option value="sk6812">SK6812 (RGBW)</option>
+                                <option value="ws2805">WS2805 (RGBCCT)</option>
                             </select>
                         </div>
                         <div class="config-item">
@@ -953,6 +954,8 @@
                                 <option value="rgb">RGB</option>
                                 <option value="bgr">BGR</option>
                                 <option value="rbg">RBG</option>
+                                <option value="brg">BRG</option>
+                                <option value="gbr">GBR</option>
                             </select>
                         </div>
                     </div>
@@ -1065,8 +1068,10 @@
                     <p><strong>config</strong> <span>Show current settings</span></p>
                     <p><strong>set leds &lt;n&gt;</strong> <span>Set LED count</span></p>
                     <p><strong>set gpio &lt;n&gt;</strong> <span>Set data pin</span></p>
-                    <p><strong>set type &lt;type&gt;</strong> <span>ws2812b, ws2811, sk6812</span></p>
-                    <p><strong>set order &lt;order&gt;</strong> <span>grb, rgb, bgr, rbg</span></p>
+                    <p><strong>set type &lt;type&gt;</strong> <span>ws2812b, ws2811, sk6812, ws2805</span></p>
+                    <p><strong>set bin &lt;n|off&gt;</strong> <span>WS2805 backup data GPIO</span></p>
+                    <p><strong>set white_order &lt;o&gt;</strong> <span>WS2805 whites: ww_cw, cw_ww</span></p>
+                    <p><strong>set order &lt;order&gt;</strong> <span>grb, rgb, brg, rbg, bgr, gbr</span></p>
                     <p><strong>set brightness &lt;n&gt;</strong> <span>Max brightness 1-255</span></p>
                     <p><strong>save</strong> <span>Save config to flash</span></p>
                     <p><strong>reboot</strong> <span>Restart device</span></p>
@@ -1144,6 +1149,7 @@
         const serialInput = document.getElementById('serialInput');
         const sendBtn = document.getElementById('sendBtn');
         let serialBuffer = '';
+        let parseConfigBuffer = '';
 
         function log(text, type = 'response') {
             const span = document.createElement('span');
@@ -1253,6 +1259,7 @@
             updateStatus(false);
             log('Disconnected\n', 'prompt');
             serialBuffer = '';
+            parseConfigBuffer = '';
         }
 
         async function sendCommand(cmd) {
@@ -1263,7 +1270,14 @@
         }
 
         function parseConfig(text) {
-            const lines = text.split('\n');
+            // Buffer incoming text across chunks so a line split mid-chunk doesn't
+            // truncate the value (e.g. "ws2" instead of "ws2805").
+            parseConfigBuffer += text;
+            const lines = parseConfigBuffer.split('\n');
+            // Keep the last element: it's either empty (line ended with \n) or a
+            // partial line that will be completed by the next chunk.
+            parseConfigBuffer = lines.pop();
+
             for (const line of lines) {
                 const match = line.match(/^\s*(\w+)\s*=\s*(.+)$/);
                 if (match) {

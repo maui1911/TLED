@@ -81,6 +81,39 @@ static inline tled_rgbw_color_t tled_rgb_to_rgbw(uint8_t r, uint8_t g, uint8_t b
     return out;
 }
 
+typedef struct {
+    uint8_t ww;
+    uint8_t cw;
+} tled_white_channels_t;
+
+/**
+ * @brief Convert a color temperature to warm/cool white channel levels (WS2805).
+ *
+ * Pure helper for the output pipeline and unit tests. Linear mix between the
+ * warm and cool white channels: at max_mireds (warmest) only WW is driven,
+ * at min_mireds (coolest) only CW. The result is scaled by level (0-255
+ * overall brightness) and gain_w. Out-of-range mireds are clamped.
+ */
+static inline tled_white_channels_t tled_ct_to_whites(uint16_t mireds,
+                                                      uint16_t min_mireds, uint16_t max_mireds,
+                                                      uint8_t level, uint8_t gain_w)
+{
+    if (mireds < min_mireds) {
+        mireds = min_mireds;
+    }
+    if (mireds > max_mireds) {
+        mireds = max_mireds;
+    }
+
+    // Warm fraction 0-255: 0 = coolest (min mireds), 255 = warmest (max mireds)
+    uint32_t warm = ((uint32_t)(mireds - min_mireds) * 255) / (max_mireds - min_mireds);
+
+    tled_white_channels_t out;
+    out.ww = tled_apply_channel_gain((uint8_t)(((uint32_t)level * warm) / 255), gain_w);
+    out.cw = tled_apply_channel_gain((uint8_t)(((uint32_t)level * (255 - warm)) / 255), gain_w);
+    return out;
+}
+
 /**
  * @brief Initialize the LED driver (onboard LED for Phase 1)
  *
@@ -186,20 +219,28 @@ esp_err_t app_driver_light_set_hsv_with_transition(app_driver_handle_t handle,
                                                     uint32_t transition_ms);
 
 /**
- * @brief Set color temperature with a custom transition time
+ * @brief Set color temperature
  *
- * Converts the color temperature (in mireds) to an RGB white point and drives
- * it through the HSV transition engine. On SK6812 RGBW strips the white
- * component is routed to the dedicated W channel via the configured white mode.
+ * Switches the light to color temperature mode. WS2805 drives its warm/cool
+ * white channels; SK6812 mixes its W LED with RGB (see white_temp config).
  *
  * @param handle Driver handle
- * @param mireds Color temperature in mireds (1,000,000 / Kelvin)
- * @param transition_ms Transition duration in milliseconds (0 = immediate)
+ * @param mireds Color temperature in mireds (clamped to TLED_CT_MIN/MAX_MIREDS)
  * @return ESP_OK on success
  */
-esp_err_t app_driver_light_set_color_temperature_with_transition(app_driver_handle_t handle,
-                                                                 uint16_t mireds,
-                                                                 uint32_t transition_ms);
+esp_err_t app_driver_light_set_color_temp(app_driver_handle_t handle, uint16_t mireds);
+
+/**
+ * @brief Set color temperature with transition time
+ *
+ * @param handle Driver handle
+ * @param mireds Color temperature in mireds
+ * @param transition_ms Transition time in milliseconds (0 = instant)
+ * @return ESP_OK on success
+ */
+esp_err_t app_driver_light_set_color_temp_with_transition(app_driver_handle_t handle,
+                                                          uint16_t mireds,
+                                                          uint32_t transition_ms);
 
 /**
  * @brief Set an effect mode

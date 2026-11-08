@@ -19,6 +19,7 @@
 #include "app_driver.h"
 #include "app_config.h"
 #include "app_nvs_config.h"
+#include "ws2805_strip.h"
 
 #include <iot_button.h>
 #include <button_gpio.h>
@@ -29,8 +30,8 @@
 #define NVS_KEY_BRIGHTNESS "brightness"
 #define NVS_KEY_HUE "hue"
 #define NVS_KEY_SATURATION "saturation"
+#define NVS_KEY_COLOR_TEMP "color_temp"
 #define NVS_KEY_COLOR_MODE "color_mode"
-#define NVS_KEY_CT_MIREDS "ct_mireds"
 
 // Debounce timing for NVS saves (5 seconds)
 #define NVS_SAVE_DEBOUNCE_MS 5000
@@ -46,11 +47,11 @@ static const char *TAG = "tled_driver";
 // External reference to light endpoint ID (defined in app_main.cpp)
 extern uint16_t light_endpoint_id;
 
-// Color modes
+// Color modes (values match the Matter ColorControl ColorMode enum)
 typedef enum {
     COLOR_MODE_HSV = 0,
     COLOR_MODE_XY = 1,
-    COLOR_MODE_CT = 2,   // Color temperature (mireds)
+    COLOR_MODE_CT = 2,
 } color_mode_t;
 
 // Transition state
@@ -59,16 +60,19 @@ typedef struct {
     float start_hue;
     float start_sat;
     float start_val;
+    float start_ct;
 
     // Target values
     float target_hue;
     float target_sat;
     float target_val;
+    float target_ct;
 
     // Current interpolated values (for display)
     float current_hue;
     float current_sat;
     float current_val;
+    float current_ct;
 
     // Transition timing (using ticks for proper wrap-around handling)
     TickType_t transition_start_ticks;
@@ -79,14 +83,15 @@ typedef struct {
 // Driver state structure
 typedef struct {
     led_strip_handle_t strip;
+    ws2805_strip_handle_t ws2805;   // Set instead of strip for WS2805 chipset
     bool is_rgbw;
     bool power;
     uint8_t brightness;     // 0-254 (Matter range)
     uint8_t hue;            // 0-254 (Matter range)
     uint8_t saturation;     // 0-254 (Matter range)
+    uint16_t color_temp;    // Color temperature in mireds
     uint16_t color_x;       // 0-65535 (Matter CIE x * 65535)
     uint16_t color_y;       // 0-65535 (Matter CIE y * 65535)
-    uint16_t color_temp_mireds;  // Last color temperature (mireds)
     color_mode_t color_mode;
 
     // Phase 3: Transitions and effects
@@ -107,6 +112,8 @@ typedef struct {
     uint8_t gain_g;
     uint8_t gain_b;
     uint8_t gain_w;
+    uint8_t bin_gpio;       // WS2805 backup data GPIO (TLED_BIN_GPIO_DISABLED = off)
+    uint8_t white_order;    // WS2805 white channel order (tled_white_order_t)
     uint16_t white_led_kelvin;  // Native color temp of the W LED (K)
 
     // Debounce state for HSV updates (issue 7)
@@ -121,14 +128,15 @@ typedef struct {
 // Static driver instance
 static light_driver_t s_light_driver = {
     .strip = NULL,
+    .ws2805 = NULL,
     .is_rgbw = false,
     .power = false,
     .brightness = 127,
     .hue = 0,
     .saturation = 0,
+    .color_temp = TLED_DEFAULT_CT_MIREDS,
     .color_x = 24939,
     .color_y = 24701,
-    .color_temp_mireds = 250,
     .color_mode = COLOR_MODE_HSV,
     .transition = {0},
     .effect_id = TLED_EFFECT_NONE,
@@ -145,6 +153,8 @@ static light_driver_t s_light_driver = {
     .gain_g = TLED_DEFAULT_CHANNEL_GAIN,
     .gain_b = TLED_DEFAULT_CHANNEL_GAIN,
     .gain_w = TLED_DEFAULT_CHANNEL_GAIN,
+    .bin_gpio = TLED_BIN_GPIO_DISABLED,
+    .white_order = TLED_DEFAULT_WHITE_ORDER,
     .white_led_kelvin = TLED_DEFAULT_WHITE_LED_KELVIN,
     .hsv_update_pending = false,
     .hsv_update_time = 0,
@@ -155,6 +165,8 @@ static light_driver_t s_light_driver = {
 // Forward declarations
 static void transition_task(void *arg);
 static esp_err_t update_strip_rgb(light_driver_t *driver, uint8_t r, uint8_t g, uint8_t b);
+static esp_err_t update_strip_channels(light_driver_t *driver, uint8_t r, uint8_t g, uint8_t b,
+                                       uint8_t ww, uint8_t cw);
 static void start_transition(light_driver_t *driver, uint8_t target_hue, uint8_t target_sat,
                              uint8_t target_val, uint32_t duration_ms);
 
@@ -185,13 +197,13 @@ static esp_err_t do_save_state_to_nvs(void)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to set saturation: %s", esp_err_to_name(err));
     }
+    err = nvs_set_u16(handle, NVS_KEY_COLOR_TEMP, s_light_driver.color_temp);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set color temp: %s", esp_err_to_name(err));
+    }
     err = nvs_set_u8(handle, NVS_KEY_COLOR_MODE, (uint8_t)s_light_driver.color_mode);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to set color_mode: %s", esp_err_to_name(err));
-    }
-    err = nvs_set_u16(handle, NVS_KEY_CT_MIREDS, s_light_driver.color_temp_mireds);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to set ct_mireds: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "Failed to set color mode: %s", esp_err_to_name(err));
     }
 
     err = nvs_commit(handle);
@@ -256,12 +268,12 @@ static esp_err_t load_state_from_nvs(void)
     if (nvs_get_u8(handle, NVS_KEY_SATURATION, &val) == ESP_OK) {
         s_light_driver.saturation = val;
     }
-    if (nvs_get_u8(handle, NVS_KEY_COLOR_MODE, &val) == ESP_OK) {
-        s_light_driver.color_mode = (color_mode_t)val;
+    uint16_t val16;
+    if (nvs_get_u16(handle, NVS_KEY_COLOR_TEMP, &val16) == ESP_OK) {
+        s_light_driver.color_temp = val16;
     }
-    uint16_t mireds;
-    if (nvs_get_u16(handle, NVS_KEY_CT_MIREDS, &mireds) == ESP_OK) {
-        s_light_driver.color_temp_mireds = mireds;
+    if (nvs_get_u8(handle, NVS_KEY_COLOR_MODE, &val) == ESP_OK && val <= COLOR_MODE_CT) {
+        s_light_driver.color_mode = (color_mode_t)val;
     }
 
     nvs_close(handle);
@@ -429,10 +441,25 @@ static void remap_rgb_order(uint8_t order, uint8_t r, uint8_t g, uint8_t b,
     }
 }
 
-// Set a single pixel, handling RGB order remapping and RGBW conversion
+// Set a single pixel, handling RGB order remapping and RGBW/WS2805 conversion.
+// ww/cw are only used on WS2805 strips; pass 0 for RGB-only content (effects).
 static esp_err_t driver_set_pixel(light_driver_t *driver, int index,
-                                   uint8_t r, uint8_t g, uint8_t b)
+                                   uint8_t r, uint8_t g, uint8_t b,
+                                   uint8_t ww, uint8_t cw)
 {
+    if (driver->ws2805 != NULL) {
+        // Apply channel gains and RGB order remapping, then map the white
+        // channels onto W1/W2 according to the configured wiring order
+        uint8_t gr = tled_apply_channel_gain(r, driver->gain_r);
+        uint8_t gg = tled_apply_channel_gain(g, driver->gain_g);
+        uint8_t gb = tled_apply_channel_gain(b, driver->gain_b);
+        uint8_t mr, mg, mb;
+        remap_rgb_order(driver->rgb_order, gr, gg, gb, &mr, &mg, &mb);
+
+        uint8_t w1 = (driver->white_order == WHITE_ORDER_CW_WW) ? cw : ww;
+        uint8_t w2 = (driver->white_order == WHITE_ORDER_CW_WW) ? ww : cw;
+        return ws2805_strip_set_pixel(driver->ws2805, index, mr, mg, mb, w1, w2);
+    }
     if (driver->is_rgbw) {
         tled_rgbw_color_t rgbw = tled_rgb_to_rgbw(r, g, b,
                                                   driver->white_mode,
@@ -451,18 +478,34 @@ static esp_err_t driver_set_pixel(light_driver_t *driver, int index,
     return led_strip_set_pixel(driver->strip, index, mr, mg, mb);
 }
 
-// Update strip with specific RGB values
-static esp_err_t update_strip_rgb(light_driver_t *driver, uint8_t r, uint8_t g, uint8_t b)
+// Transmit the frame buffer to whichever strip driver is active
+static esp_err_t driver_refresh(light_driver_t *driver)
 {
-    if (driver->strip == NULL) {
+    if (driver->ws2805 != NULL) {
+        return ws2805_strip_refresh(driver->ws2805);
+    }
+    return led_strip_refresh(driver->strip);
+}
+
+// Update the whole strip with specific channel values
+static esp_err_t update_strip_channels(light_driver_t *driver, uint8_t r, uint8_t g, uint8_t b,
+                                       uint8_t ww, uint8_t cw)
+{
+    if (driver->strip == NULL && driver->ws2805 == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
     for (int i = 0; i < driver->num_leds; i++) {
-        driver_set_pixel(driver, i, r, g, b);
+        driver_set_pixel(driver, i, r, g, b, ww, cw);
     }
 
-    return led_strip_refresh(driver->strip);
+    return driver_refresh(driver);
+}
+
+// Update strip with specific RGB values (white channels off)
+static esp_err_t update_strip_rgb(light_driver_t *driver, uint8_t r, uint8_t g, uint8_t b)
+{
+    return update_strip_channels(driver, r, g, b, 0, 0);
 }
 
 // Update strip with explicit RGBW values (CT path - bypasses white extraction).
@@ -490,10 +533,10 @@ static esp_err_t render_ct(light_driver_t *driver, uint8_t brightness)
     uint8_t r, g, b, w;
 
     if (driver->is_rgbw) {
-        ct_to_rgbw_full(driver->color_temp_mireds, driver->white_led_kelvin, &r, &g, &b, &w);
+        ct_to_rgbw_full(driver->color_temp, driver->white_led_kelvin, &r, &g, &b, &w);
     } else {
         // No white channel: just emit the target white point as RGB.
-        ct_mireds_to_rgb(driver->color_temp_mireds, &r, &g, &b);
+        ct_mireds_to_rgb(driver->color_temp, &r, &g, &b);
         w = 0;
     }
 
@@ -535,18 +578,48 @@ static void apply_max_brightness(light_driver_t *driver, uint8_t *r, uint8_t *g,
     }
 }
 
-// Calculate current interpolated RGB from transition state
-static void get_interpolated_rgb(light_driver_t *driver, uint8_t *r, uint8_t *g, uint8_t *b)
+// Compute output channels from color state. In CT mode (WS2805) the white
+// channels render the color temperature and RGB stays off; in HSV mode RGB
+// renders the color and whites stay off.
+// hue: 0-360, sat: 0-100, val: 0-100, ct: mireds
+static void compute_output_channels(light_driver_t *driver,
+                                    uint16_t hue, uint8_t sat, uint8_t val, uint16_t ct,
+                                    uint8_t *r, uint8_t *g, uint8_t *b,
+                                    uint8_t *ww, uint8_t *cw)
 {
-    // Convert current interpolated values to standard ranges
-    uint16_t hue = (uint16_t)((driver->transition.current_hue * STANDARD_HUE_MAX) / MATTER_HUE_MAX);
-    uint8_t sat = (uint8_t)((driver->transition.current_sat * STANDARD_SATURATION_MAX) / MATTER_SATURATION_MAX);
-    uint8_t val = (uint8_t)((driver->transition.current_val * STANDARD_BRIGHTNESS_MAX) / MATTER_BRIGHTNESS_MAX);
+    *r = *g = *b = 0;
+    *ww = *cw = 0;
+
+    if (driver->color_mode == COLOR_MODE_CT && driver->ws2805 != NULL) {
+        uint8_t level = (uint8_t)(((uint16_t)val * 255) / STANDARD_BRIGHTNESS_MAX);
+        // Apply max_brightness limit to the white channels as well
+        if (driver->max_brightness < 255) {
+            level = (uint8_t)(((uint16_t)level * driver->max_brightness) / 255);
+        }
+        tled_white_channels_t whites = tled_ct_to_whites(ct, TLED_CT_MIN_MIREDS, TLED_CT_MAX_MIREDS,
+                                                         level, driver->gain_w);
+        *ww = whites.ww;
+        *cw = whites.cw;
+        return;
+    }
 
     hsv_to_rgb(hue, sat, val, r, g, b);
 
     // Apply max_brightness limit (issue 9)
     apply_max_brightness(driver, r, g, b);
+}
+
+// Calculate current interpolated output channels from transition state
+static void get_interpolated_channels(light_driver_t *driver, uint8_t *r, uint8_t *g, uint8_t *b,
+                                      uint8_t *ww, uint8_t *cw)
+{
+    // Convert current interpolated values to standard ranges
+    uint16_t hue = (uint16_t)((driver->transition.current_hue * STANDARD_HUE_MAX) / MATTER_HUE_MAX);
+    uint8_t sat = (uint8_t)((driver->transition.current_sat * STANDARD_SATURATION_MAX) / MATTER_SATURATION_MAX);
+    uint8_t val = (uint8_t)((driver->transition.current_val * STANDARD_BRIGHTNESS_MAX) / MATTER_BRIGHTNESS_MAX);
+    uint16_t ct = (uint16_t)driver->transition.current_ct;
+
+    compute_output_channels(driver, hue, sat, val, ct, r, g, b, ww, cw);
 }
 
 // Linear interpolation with hue wrap-around handling
@@ -583,7 +656,7 @@ static float lerp(float from, float to, float t)
 // Rainbow effect - cycle through hues
 static void effect_rainbow(light_driver_t *driver)
 {
-    if (driver->strip == NULL) return;
+    if (driver->strip == NULL && driver->ws2805 == NULL) return;
 
     // Use effect_step as hue offset
     uint16_t base_hue = driver->effect_step % 360;
@@ -602,7 +675,7 @@ static void effect_rainbow(light_driver_t *driver)
 // Breathing effect - pulse brightness
 static void effect_breathing(light_driver_t *driver)
 {
-    if (driver->strip == NULL) return;
+    if (driver->strip == NULL && driver->ws2805 == NULL) return;
 
     // Sine wave for smooth breathing
     float phase = (float)(driver->effect_step % 360) * 3.14159f / 180.0f;
@@ -627,7 +700,7 @@ static void effect_breathing(light_driver_t *driver)
 // Candle flicker effect
 static void effect_candle(light_driver_t *driver)
 {
-    if (driver->strip == NULL) return;
+    if (driver->strip == NULL && driver->ws2805 == NULL) return;
 
     // Random flicker with warm color
     uint8_t max_val = (driver->brightness * STANDARD_BRIGHTNESS_MAX) / MATTER_BRIGHTNESS_MAX;
@@ -650,7 +723,7 @@ static void effect_candle(light_driver_t *driver)
 // Chase effect - moving dot
 static void effect_chase(light_driver_t *driver)
 {
-    if (driver->strip == NULL) return;
+    if (driver->strip == NULL && driver->ws2805 == NULL) return;
 
     // Get current color
     uint16_t hue = (driver->hue * STANDARD_HUE_MAX) / MATTER_HUE_MAX;
@@ -669,15 +742,15 @@ static void effect_chase(light_driver_t *driver)
     // Set all LEDs
     for (int i = 0; i < num_leds; i++) {
         if (i == pos) {
-            driver_set_pixel(driver, i, r, g, b);
+            driver_set_pixel(driver, i, r, g, b, 0, 0);
         } else if (i == trail) {
-            driver_set_pixel(driver, i, r / 3, g / 3, b / 3);
+            driver_set_pixel(driver, i, r / 3, g / 3, b / 3, 0, 0);
         } else {
-            driver_set_pixel(driver, i, 0, 0, 0);
+            driver_set_pixel(driver, i, 0, 0, 0, 0, 0);
         }
     }
 
-    led_strip_refresh(driver->strip);
+    driver_refresh(driver);
     driver->effect_step++;
 }
 
@@ -702,7 +775,7 @@ static void transition_task(void *arg)
                 uint8_t bri = driver->brightness;
                 xSemaphoreGive(driver->mutex);
 
-                ESP_LOGI(TAG, "HSV debounce complete: H=%d S=%d, starting transition", hue, sat);
+                ESP_LOGI(TAG, "Debounce complete: H=%d S=%d, starting transition", hue, sat);
                 start_transition(driver, hue, sat, bri, TLED_DEFAULT_TRANSITION_MS);
 
                 xSemaphoreTake(driver->mutex, portMAX_DELAY);
@@ -758,6 +831,7 @@ static void transition_task(void *arg)
                 driver->transition.current_hue = driver->transition.target_hue;
                 driver->transition.current_sat = driver->transition.target_sat;
                 driver->transition.current_val = driver->transition.target_val;
+                driver->transition.current_ct = driver->transition.target_ct;
                 driver->transition.transitioning = false;
                 ESP_LOGI(TAG, "Transition complete");
             } else {
@@ -780,18 +854,21 @@ static void transition_task(void *arg)
                     driver->transition.target_val,
                     t
                 );
+                driver->transition.current_ct = lerp(
+                    driver->transition.start_ct,
+                    driver->transition.target_ct,
+                    t
+                );
             }
 
-            // Update strip with interpolated values. In CT mode the color is
-            // rendered from mireds directly; only the brightness (current_val)
-            // is interpolated, so temperature changes apply cleanly while
-            // brightness still fades.
-            if (driver->color_mode == COLOR_MODE_CT) {
+            // Update strip with interpolated values. SK6812 CT is rendered from
+            // mireds directly; only brightness (current_val) is interpolated.
+            if (driver->color_mode == COLOR_MODE_CT && driver->is_rgbw) {
                 render_ct(driver, (uint8_t)driver->transition.current_val);
             } else {
-                uint8_t r, g, b;
-                get_interpolated_rgb(driver, &r, &g, &b);
-                update_strip_rgb(driver, r, g, b);
+                uint8_t r, g, b, ww, cw;
+                get_interpolated_channels(driver, &r, &g, &b, &ww, &cw);
+                update_strip_channels(driver, r, g, b, ww, cw);
             }
         }
 
@@ -812,16 +889,20 @@ static void start_transition(light_driver_t *driver, uint8_t target_hue, uint8_t
         driver->transition.start_hue = driver->transition.current_hue;
         driver->transition.start_sat = driver->transition.current_sat;
         driver->transition.start_val = driver->transition.current_val;
+        driver->transition.start_ct = driver->transition.current_ct;
     } else {
         // Not transitioning - start from last known state
         driver->transition.start_hue = driver->transition.current_hue;
         driver->transition.start_sat = driver->transition.current_sat;
         driver->transition.start_val = driver->transition.current_val;
+        driver->transition.start_ct = driver->transition.current_ct;
     }
 
     driver->transition.target_hue = target_hue;
     driver->transition.target_sat = target_sat;
     driver->transition.target_val = target_val;
+    // Color temperature always tracks the driver state (only rendered in CT mode)
+    driver->transition.target_ct = driver->color_temp;
     driver->transition.transition_start_ticks = xTaskGetTickCount();
     driver->transition.transition_duration_ms = duration_ms > 0 ? duration_ms : 1;
     driver->transition.transitioning = true;
@@ -843,50 +924,56 @@ static esp_err_t update_immediate(light_driver_t *driver)
 {
     xSemaphoreTake(driver->mutex, portMAX_DELAY);
 
-    // Color-temperature mode renders RGBW directly (white-primary), bypassing
+    // SK6812 color temperature renders RGBW directly (white-primary), bypassing
     // the HSV path entirely.
-    if (driver->power && driver->color_mode == COLOR_MODE_CT) {
+    if (driver->power && driver->color_mode == COLOR_MODE_CT && driver->is_rgbw) {
         esp_err_t err = render_ct(driver, driver->brightness);
         driver->transition.current_hue = driver->hue;
         driver->transition.current_sat = driver->saturation;
         driver->transition.current_val = driver->brightness;
+        driver->transition.current_ct = driver->color_temp;
         driver->transition.start_hue = driver->hue;
         driver->transition.start_sat = driver->saturation;
         driver->transition.start_val = driver->brightness;
         driver->transition.transitioning = false;
         ESP_LOGI(TAG, "CT mode: %u mireds (%uK) bri=%d",
-                 driver->color_temp_mireds,
-                 (unsigned)(driver->color_temp_mireds ? 1000000u / driver->color_temp_mireds : 0),
+                 driver->color_temp,
+                 (unsigned)(driver->color_temp ? 1000000u / driver->color_temp : 0),
                  driver->brightness);
         xSemaphoreGive(driver->mutex);
         return err;
     }
 
-    uint8_t r, g, b;
+    uint8_t r = 0, g = 0, b = 0, ww = 0, cw = 0;
 
     if (!driver->power) {
-        r = g = b = 0;
         ESP_LOGI(TAG, "Strip OFF");
     } else {
         uint16_t hue = (driver->hue * STANDARD_HUE_MAX) / MATTER_HUE_MAX;
         uint8_t sat = (driver->saturation * STANDARD_SATURATION_MAX) / MATTER_SATURATION_MAX;
         uint8_t val = (driver->brightness * STANDARD_BRIGHTNESS_MAX) / MATTER_BRIGHTNESS_MAX;
-        hsv_to_rgb(hue, sat, val, &r, &g, &b);
-        apply_max_brightness(driver, &r, &g, &b);
-        ESP_LOGI(TAG, "HSV mode: H=%d S=%d V=%d -> R=%d G=%d B=%d (max_bri=%d)",
-                 driver->hue, driver->saturation, driver->brightness, r, g, b, driver->max_brightness);
+        compute_output_channels(driver, hue, sat, val, driver->color_temp, &r, &g, &b, &ww, &cw);
+        if (driver->color_mode == COLOR_MODE_CT) {
+            ESP_LOGI(TAG, "CT mode: %d mireds V=%d -> WW=%d CW=%d (max_bri=%d)",
+                     driver->color_temp, driver->brightness, ww, cw, driver->max_brightness);
+        } else {
+            ESP_LOGI(TAG, "HSV mode: H=%d S=%d V=%d -> R=%d G=%d B=%d (max_bri=%d)",
+                     driver->hue, driver->saturation, driver->brightness, r, g, b, driver->max_brightness);
+        }
     }
 
     // Also update transition state to match
     driver->transition.current_hue = driver->hue;
     driver->transition.current_sat = driver->saturation;
     driver->transition.current_val = driver->power ? driver->brightness : 0;
+    driver->transition.current_ct = driver->color_temp;
     driver->transition.start_hue = driver->transition.current_hue;
     driver->transition.start_sat = driver->transition.current_sat;
     driver->transition.start_val = driver->transition.current_val;
+    driver->transition.start_ct = driver->transition.current_ct;
     driver->transition.transitioning = false;
 
-    esp_err_t err = update_strip_rgb(driver, r, g, b);
+    esp_err_t err = update_strip_channels(driver, r, g, b, ww, cw);
 
     xSemaphoreGive(driver->mutex);
 
@@ -1023,23 +1110,40 @@ esp_err_t app_driver_light_set_hsv_with_transition(app_driver_handle_t handle,
     return ESP_OK;
 }
 
-esp_err_t app_driver_light_set_color_temperature_with_transition(app_driver_handle_t handle,
-                                                                 uint16_t mireds,
-                                                                 uint32_t transition_ms)
+// Clamp mireds to the range the strip's white source supports
+static uint16_t clamp_mireds(const light_driver_t *driver, uint16_t mireds)
+{
+    uint16_t max_mireds = driver->is_rgbw ? TLED_RGBW_CT_MAX_MIREDS : TLED_CT_MAX_MIREDS;
+    if (mireds < TLED_CT_MIN_MIREDS) {
+        return TLED_CT_MIN_MIREDS;
+    }
+    if (mireds > max_mireds) {
+        return max_mireds;
+    }
+    return mireds;
+}
+
+esp_err_t app_driver_light_set_color_temp(app_driver_handle_t handle, uint16_t mireds)
+{
+    return app_driver_light_set_color_temp_with_transition(handle, mireds,
+                                                           TLED_DEFAULT_TRANSITION_MS);
+}
+
+esp_err_t app_driver_light_set_color_temp_with_transition(app_driver_handle_t handle,
+                                                          uint16_t mireds,
+                                                          uint32_t transition_ms)
 {
     light_driver_t *driver = (light_driver_t *)handle;
     if (driver == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    // CT renders RGBW directly (white-primary) - no HSV round-trip. We store
-    // the target mireds and switch into CT mode; the render path computes the
-    // RGBW mix every frame. The transition only fades brightness, so a pure
-    // temperature change applies immediately while brightness still ramps.
-    driver->color_temp_mireds = mireds;
+    xSemaphoreTake(driver->mutex, portMAX_DELAY);
+    driver->color_temp = clamp_mireds(driver, mireds);
     driver->color_mode = COLOR_MODE_CT;
-    ESP_LOGI(TAG, "Color temp set to %u mireds (%uK), transition %lums",
-             mireds, (unsigned)(mireds ? 1000000u / mireds : 0), (unsigned long)transition_ms);
+    xSemaphoreGive(driver->mutex);
+    ESP_LOGI(TAG, "Color temp set to %d mireds (transition %lums)",
+             driver->color_temp, (unsigned long)transition_ms);
 
     schedule_save_state_to_nvs();
 
@@ -1047,7 +1151,8 @@ esp_err_t app_driver_light_set_color_temperature_with_transition(app_driver_hand
         return update_immediate(driver);
     }
 
-    // Drive a transition (brightness fade); CT color is rendered from mireds.
+    // Hue/sat/brightness stay unchanged; the CT target is picked up from
+    // driver->color_temp inside start_transition
     start_transition(driver, driver->hue, driver->saturation, driver->brightness, transition_ms);
     return ESP_OK;
 }
@@ -1151,20 +1256,29 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle,
             driver->hsv_update_pending = true;
             driver->hsv_update_time = xTaskGetTickCount();
             ESP_LOGD(TAG, "HSV update pending: sat=%d", driver->saturation);
+        } else if (attribute_id == ColorControl::Attributes::ColorTemperatureMireds::Id) {
+            driver->color_temp = clamp_mireds(driver, val->val.u16);
+            driver->color_mode = COLOR_MODE_CT;
+            // Reuse the same debounce path as hue/sat updates
+            driver->hsv_update_pending = true;
+            driver->hsv_update_time = xTaskGetTickCount();
+            ESP_LOGD(TAG, "CT update pending: %d mireds", driver->color_temp);
+        } else if (attribute_id == ColorControl::Attributes::ColorMode::Id ||
+                   attribute_id == ColorControl::Attributes::EnhancedColorMode::Id) {
+            // Controller switched between hue/sat and color temperature mode
+            if (val->val.u8 == COLOR_MODE_HSV || val->val.u8 == COLOR_MODE_CT) {
+                driver->color_mode = (color_mode_t)val->val.u8;
+                driver->hsv_update_pending = true;
+                driver->hsv_update_time = xTaskGetTickCount();
+                ESP_LOGD(TAG, "Color mode changed to %d", driver->color_mode);
+            }
         }
         xSemaphoreGive(driver->mutex);
 
-        // Color temperature is handled outside the HSV debounce path: convert
-        // mireds -> HSV white point and drive a transition immediately. HA sends
-        // these via MoveToColorTemperature when the white slider is used.
-        if (attribute_id == ColorControl::Attributes::ColorTemperatureMireds::Id) {
-            app_driver_light_set_color_temperature_with_transition(
-                driver_handle, val->val.u16, TLED_DEFAULT_TRANSITION_MS);
-        }
-
         // Schedule NVS save (debounced)
         if (attribute_id == ColorControl::Attributes::CurrentHue::Id ||
-            attribute_id == ColorControl::Attributes::CurrentSaturation::Id) {
+            attribute_id == ColorControl::Attributes::CurrentSaturation::Id ||
+            attribute_id == ColorControl::Attributes::ColorTemperatureMireds::Id) {
             schedule_save_state_to_nvs();
             // Note: Transition is started by transition_task after debounce period
         }
@@ -1219,32 +1333,34 @@ esp_err_t app_driver_light_set_defaults(uint16_t endpoint_id)
         val = esp_matter_uint8(driver->saturation);
         attribute::update(endpoint_id, ColorControl::Id, ColorControl::Attributes::CurrentSaturation::Id, &val);
 
-        // Restore color mode (HSV or CT). load_state_from_nvs() already set
-        // driver->color_mode; reflect CT to Matter so Home Assistant shows the
-        // right active mode and temperature. Anything else falls back to HSV.
-        if (driver->color_mode == COLOR_MODE_CT) {
-            val = esp_matter_uint16(driver->color_temp_mireds);
+        // Restore color temperature state on strips with a white source (the
+        // attribute only exists there); other chipsets always run in HSV mode
+        if (driver->ws2805 != NULL || driver->is_rgbw) {
+            driver->color_temp = clamp_mireds(driver, driver->color_temp);
+            val = esp_matter_uint16(driver->color_temp);
             attribute::update(endpoint_id, ColorControl::Id,
                               ColorControl::Attributes::ColorTemperatureMireds::Id, &val);
-            uint8_t ct_mode = static_cast<uint8_t>(ColorControl::ColorModeEnum::kColorTemperatureMireds);
-            val = esp_matter_enum8(ct_mode);
+
+            val = esp_matter_enum8((uint8_t)driver->color_mode);
             attribute::update(endpoint_id, ColorControl::Id, ColorControl::Attributes::ColorMode::Id, &val);
             attribute::update(endpoint_id, ColorControl::Id, ColorControl::Attributes::EnhancedColorMode::Id, &val);
         } else {
             driver->color_mode = COLOR_MODE_HSV;
         }
 
-        ESP_LOGI(TAG, "Restored from NVS: power=%d (was %d), brightness=%d, mode=%d, hue=%d, sat=%d, ct=%umireds",
-                 driver->power, original_power, driver->brightness, driver->color_mode,
-                 driver->hue, driver->saturation, driver->color_temp_mireds);
+        ESP_LOGI(TAG, "Restored from NVS: power=%d (was %d), brightness=%d, hue=%d, sat=%d, ct=%d, mode=%d",
+                 driver->power, original_power, driver->brightness, driver->hue, driver->saturation,
+                 driver->color_temp, driver->color_mode);
 
         // Initialize transition state
         driver->transition.current_hue = driver->hue;
         driver->transition.current_sat = driver->saturation;
         driver->transition.current_val = driver->power ? driver->brightness : 0;
+        driver->transition.current_ct = driver->color_temp;
         driver->transition.start_hue = driver->transition.current_hue;
         driver->transition.start_sat = driver->transition.current_sat;
         driver->transition.start_val = driver->transition.current_val;
+        driver->transition.start_ct = driver->transition.current_ct;
 
         return update_immediate(driver);
     }
@@ -1289,9 +1405,11 @@ esp_err_t app_driver_light_set_defaults(uint16_t endpoint_id)
     driver->transition.current_hue = driver->hue;
     driver->transition.current_sat = driver->saturation;
     driver->transition.current_val = driver->power ? driver->brightness : 0;
+    driver->transition.current_ct = driver->color_temp;
     driver->transition.start_hue = driver->transition.current_hue;
     driver->transition.start_sat = driver->transition.current_sat;
     driver->transition.start_val = driver->transition.current_val;
+    driver->transition.start_ct = driver->transition.current_ct;
 
     return update_immediate(driver);
 }
@@ -1310,6 +1428,8 @@ app_driver_handle_t app_driver_light_init(void)
     s_light_driver.gain_g = config->gain_g;
     s_light_driver.gain_b = config->gain_b;
     s_light_driver.gain_w = config->gain_w;
+    s_light_driver.bin_gpio = config->bin_gpio;
+    s_light_driver.white_order = config->white_order;
     s_light_driver.white_led_kelvin = config->white_led_kelvin;
 
     static const char *rgb_order_names[] = {"GRB", "RGB", "BRG", "RBG", "BGR", "GBR"};
@@ -1334,44 +1454,63 @@ app_driver_handle_t app_driver_light_init(void)
     s_light_driver.is_rgbw = (config->chipset == CHIPSET_SK6812);
 
     // Buffer size: use max of configured LEDs or 100 to clear leftover data
+    // (applies to WS2805 too - the extra ICs are zeroed on every refresh)
     uint16_t strip_buffer_size = s_light_driver.num_leds > 100 ? s_light_driver.num_leds : 100;
 
-    // Determine LED model
-    led_model_t led_model;
-    switch (config->chipset) {
-        case CHIPSET_SK6812: led_model = LED_MODEL_SK6812; break;
-        case CHIPSET_WS2811: led_model = LED_MODEL_WS2812; break;
-        default:             led_model = LED_MODEL_WS2812; break;
+    if (config->chipset == CHIPSET_WS2805) {
+        // WS2805 is 5 channels per IC - handled by the dedicated driver.
+        ws2805_strip_config_t ws2805_config = {
+            .gpio_num = s_light_driver.gpio_pin,
+            .bin_gpio_num = (config->bin_gpio == TLED_BIN_GPIO_DISABLED) ? -1 : config->bin_gpio,
+            .num_pixels = strip_buffer_size,
+        };
+
+        esp_err_t err = ws2805_strip_new(&ws2805_config, &s_light_driver.ws2805);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create WS2805 strip: %s", esp_err_to_name(err));
+            return NULL;
+        }
+
+        // Clear all pixels in buffer (turns off any leftover state from previous config)
+        ws2805_strip_clear(s_light_driver.ws2805);
+    } else {
+        // Determine LED model
+        led_model_t led_model;
+        switch (config->chipset) {
+            case CHIPSET_SK6812: led_model = LED_MODEL_SK6812; break;
+            case CHIPSET_WS2811: led_model = LED_MODEL_WS2812; break;
+            default:             led_model = LED_MODEL_WS2812; break;
+        }
+
+        // Configure LED strip
+        led_strip_config_t strip_config = {
+            .strip_gpio_num = s_light_driver.gpio_pin,
+            .max_leds = strip_buffer_size,
+            .led_pixel_format = s_light_driver.is_rgbw ? LED_PIXEL_FORMAT_GRBW : LED_PIXEL_FORMAT_GRB,
+            .led_model = led_model,
+            .flags = { .invert_out = false },
+        };
+
+        led_strip_rmt_config_t rmt_config = {
+            .clk_src = RMT_CLK_SRC_DEFAULT,
+            .resolution_hz = 10 * 1000 * 1000,
+            .mem_block_symbols = 64,
+            .flags = { .with_dma = false },
+        };
+
+        esp_err_t err = led_strip_new_rmt_device(&strip_config, &rmt_config, &s_light_driver.strip);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create LED strip: %s", esp_err_to_name(err));
+            return NULL;
+        }
+
+        ESP_LOGI(TAG, "LED strip created: model=%s, format=%s",
+                 s_light_driver.is_rgbw ? "SK6812" : "WS2812",
+                 s_light_driver.is_rgbw ? "GRBW" : "GRB");
+
+        // Clear all LEDs in buffer (turns off any leftover LEDs from previous config)
+        led_strip_clear(s_light_driver.strip);
     }
-
-    // Configure LED strip
-    led_strip_config_t strip_config = {
-        .strip_gpio_num = s_light_driver.gpio_pin,
-        .max_leds = strip_buffer_size,
-        .led_pixel_format = s_light_driver.is_rgbw ? LED_PIXEL_FORMAT_GRBW : LED_PIXEL_FORMAT_GRB,
-        .led_model = led_model,
-        .flags = { .invert_out = false },
-    };
-
-    led_strip_rmt_config_t rmt_config = {
-        .clk_src = RMT_CLK_SRC_DEFAULT,
-        .resolution_hz = 10 * 1000 * 1000,
-        .mem_block_symbols = 64,
-        .flags = { .with_dma = false },
-    };
-
-    esp_err_t err = led_strip_new_rmt_device(&strip_config, &rmt_config, &s_light_driver.strip);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create LED strip: %s", esp_err_to_name(err));
-        return NULL;
-    }
-
-    ESP_LOGI(TAG, "LED strip created: model=%s, format=%s",
-             s_light_driver.is_rgbw ? "SK6812" : "WS2812",
-             s_light_driver.is_rgbw ? "GRBW" : "GRB");
-
-    // Clear all LEDs in buffer (turns off any leftover LEDs from previous config)
-    led_strip_clear(s_light_driver.strip);
 
     // Create NVS save timer for debounced writes (issue 8)
     s_light_driver.nvs_save_timer = xTimerCreate(

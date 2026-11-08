@@ -6,6 +6,9 @@ menu "TLED Configuration"
         range 1 1000
         help
             Number of LEDs in your WS2812B/SK6812 strip.
+            For WS2805 strips this is the number of ICs (addressable groups),
+            not individual LEDs - one WS2805 IC drives a group of LEDs
+            (e.g. 6 LEDs per IC on 24V strips).
 
     config TLED_GPIO_PIN
         int "LED data GPIO pin"
@@ -37,7 +40,24 @@ menu "TLED Configuration"
             bool "WS2811"
         config TLED_LED_SK6812
             bool "SK6812 (RGBW)"
+        config TLED_LED_WS2805
+            bool "WS2805 (RGB + warm/cool white)"
     endchoice
+
+    config TLED_WS2805_BIN_GPIO
+        int "WS2805 BIN (backup data) GPIO pin (-1 = disabled)"
+        depends on TLED_LED_WS2805
+        default -1
+        range -1 23
+        help
+            Optional GPIO for the WS2805 BIN (DIN2) backup data line.
+            The same waveform as DIN is mirrored to this pin, so the strip
+            keeps working even if a single IC in the chain fails.
+            Set to -1 to disable (tie the strip's BIN to DIN externally,
+            or leave it unconnected).
+            Avoid reserved pins: GPIO9 (boot button), GPIO12-13 (USB),
+            GPIO15 (onboard LED), and the pin used for TLED_GPIO_PIN.
+            The serial 'set bin' command enforces this; menuconfig does not.
 
     choice TLED_RGB_ORDER
         prompt "RGB byte order"

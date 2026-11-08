@@ -343,39 +343,43 @@ extern "C" void app_main()
     endpoint_t *endpoint = dimmable_light::create(node, &light_config, ENDPOINT_FLAG_NONE, light_handle);
     ABORT_APP_ON_FAILURE(endpoint != nullptr, ESP_LOGE(TAG, "Failed to create dimmable light endpoint"));
 
-    /* Add ColorControl cluster with HSV + Color Temperature features.
-     * We deliberately do NOT add the XY feature: Matter has no dedicated
-     * RGBW/white channel, so a warm/cool-white slider in Home Assistant is
-     * only reachable via the Color Temperature (CT) feature. HA maps CT to a
-     * "color_temp" mode shown alongside the HS color picker. The physical
-     * SK6812 white channel is mixed firmware-side (see app_driver.cpp).
-     */
+    /* Add ColorControl cluster with HSV, plus Color Temperature on strips with a
+     * white source. Matter has no RGBW/white channel concept, so a warm/cool
+     * white control is only reachable through the Color Temperature feature. */
+    bool has_white_source = (config->chipset == CHIPSET_WS2805 || config->chipset == CHIPSET_SK6812);
+
     cluster::color_control::config_t color_config;
     color_config.color_mode = static_cast<uint8_t>(ColorControl::ColorModeEnum::kCurrentHueAndCurrentSaturation);
     color_config.enhanced_color_mode = static_cast<uint8_t>(ColorControl::ColorModeEnum::kCurrentHueAndCurrentSaturation);
-    // ColorCapabilities bitmap: bit0 = Hue/Saturation, bit4 = Color Temperature
-    color_config.color_capabilities = 0x01 | 0x10;
+    if (has_white_source) {
+        // ColorCapabilities bitmap: bit0 = Hue/Saturation, bit4 = Color Temperature
+        color_config.color_capabilities = 0x01 | 0x10;
+    }
     cluster_t *color_cluster = cluster::color_control::create(endpoint, &color_config, CLUSTER_FLAG_SERVER);
 
-    /* HSV feature - color picker */
+    /* Add HSV feature */
     cluster::color_control::feature::hue_saturation::config_t hs_config;
     hs_config.current_hue = 0;
     hs_config.current_saturation = 254;
     cluster::color_control::feature::hue_saturation::add(color_cluster, &hs_config);
 
-    /* Color Temperature feature - warm/cool white slider in Home Assistant.
-     * Physical range advertised to HA as a Kelvin range: mireds = 1e6 / Kelvin.
-     * 153 mireds = ~6535K (cool) .. 500 mireds = 2000K (warm), the common
-     * tunable-white range used by most Matter bulbs. */
-    cluster::color_control::feature::color_temperature::config_t ct_config;
-    ct_config.color_temp_physical_min_mireds = 153;   // ~6535K (cool white)
-    ct_config.color_temp_physical_max_mireds = 500;   // 2000K  (warm white)
-    ct_config.color_temperature_mireds = 250;         // ~4000K startup
-    ct_config.start_up_color_temperature_mireds = nullable<uint16_t>();  // null = use last value
-    cluster::color_control::feature::color_temperature::add(color_cluster, &ct_config);
+    /* Expose color temperature on strips with a white source.
+     * Note: adding/removing this feature changes the cluster shape, so switching
+     * strip type to/from one with a white source requires re-commissioning. */
+    if (has_white_source) {
+        uint16_t ct_max_mireds = (config->chipset == CHIPSET_SK6812) ? TLED_RGBW_CT_MAX_MIREDS : TLED_CT_MAX_MIREDS;
+        cluster::color_control::feature::color_temperature::config_t ct_config;
+        ct_config.color_temperature_mireds = TLED_DEFAULT_CT_MIREDS;
+        ct_config.color_temp_physical_min_mireds = TLED_CT_MIN_MIREDS;
+        ct_config.color_temp_physical_max_mireds = ct_max_mireds;
+        ct_config.couple_color_temp_to_level_min_mireds = TLED_CT_MIN_MIREDS;
+        ct_config.start_up_color_temperature_mireds = nullable<uint16_t>();  // null = use last value
+        cluster::color_control::feature::color_temperature::add(color_cluster, &ct_config);
+    }
 
     light_endpoint_id = endpoint::get_id(endpoint);
-    ESP_LOGI(TAG, "Color Light (HSV + CT) created with endpoint_id %d", light_endpoint_id);
+    ESP_LOGI(TAG, "Color Light (HSV%s) created with endpoint_id %d",
+             has_white_source ? " + CT" : "", light_endpoint_id);
 
     /* Create Temperature Sensor endpoint to expose chip temperature */
     temperature_sensor::config_t temp_config;

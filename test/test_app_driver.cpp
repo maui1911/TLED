@@ -155,3 +155,56 @@ TEST_CASE("RGBW gains scale converted channels", "[driver][rgbw]")
     TEST_ASSERT_EQUAL_UINT8(0, color.b);
     TEST_ASSERT_EQUAL_UINT8(15, color.w);
 }
+
+// WS2805 color temperature to warm/cool white mixing (range 153-333 mireds)
+
+TEST_CASE("CT warmest mireds drives warm white only", "[driver][ct]")
+{
+    tled_white_channels_t w = tled_ct_to_whites(333, 153, 333, 255, 255);
+    TEST_ASSERT_EQUAL_UINT8(255, w.ww);
+    TEST_ASSERT_EQUAL_UINT8(0, w.cw);
+}
+
+TEST_CASE("CT coolest mireds drives cool white only", "[driver][ct]")
+{
+    tled_white_channels_t w = tled_ct_to_whites(153, 153, 333, 255, 255);
+    TEST_ASSERT_EQUAL_UINT8(0, w.ww);
+    TEST_ASSERT_EQUAL_UINT8(255, w.cw);
+}
+
+TEST_CASE("CT midpoint splits warm and cool evenly", "[driver][ct]")
+{
+    tled_white_channels_t w = tled_ct_to_whites(243, 153, 333, 255, 255);
+    // 243 mireds = exact midpoint of 153-333: warm fraction = 127/255
+    TEST_ASSERT_EQUAL_UINT8(127, w.ww);
+    TEST_ASSERT_EQUAL_UINT8(128, w.cw);
+}
+
+TEST_CASE("CT output scales with brightness level", "[driver][ct]")
+{
+    tled_white_channels_t w = tled_ct_to_whites(333, 153, 333, 128, 255);
+    TEST_ASSERT_EQUAL_UINT8(128, w.ww);
+    TEST_ASSERT_EQUAL_UINT8(0, w.cw);
+
+    tled_white_channels_t off = tled_ct_to_whites(243, 153, 333, 0, 255);
+    TEST_ASSERT_EQUAL_UINT8(0, off.ww);
+    TEST_ASSERT_EQUAL_UINT8(0, off.cw);
+}
+
+TEST_CASE("CT white gain scales both channels", "[driver][ct]")
+{
+    tled_white_channels_t w = tled_ct_to_whites(333, 153, 333, 255, 128);
+    TEST_ASSERT_EQUAL_UINT8(128, w.ww);
+    TEST_ASSERT_EQUAL_UINT8(0, w.cw);
+}
+
+TEST_CASE("CT out-of-range mireds are clamped", "[driver][ct]")
+{
+    tled_white_channels_t too_warm = tled_ct_to_whites(500, 153, 333, 255, 255);
+    TEST_ASSERT_EQUAL_UINT8(255, too_warm.ww);
+    TEST_ASSERT_EQUAL_UINT8(0, too_warm.cw);
+
+    tled_white_channels_t too_cool = tled_ct_to_whites(50, 153, 333, 255, 255);
+    TEST_ASSERT_EQUAL_UINT8(0, too_cool.ww);
+    TEST_ASSERT_EQUAL_UINT8(255, too_cool.cw);
+}

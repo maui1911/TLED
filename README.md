@@ -1,6 +1,6 @@
 # TLED - Matter-over-Thread LED Controller
 
-A Matter-compatible LED strip controller for ESP32-C6 that works over Thread networking. Control addressable LED strips (WS2812B, SK6812, etc.) from Home Assistant, Apple Home, Google Home, or any Matter-compatible smart home platform.
+A Matter-compatible LED strip controller for ESP32-C6 that works over Thread networking. Control addressable LED strips (WS2812B, SK6812, WS2805, etc.) from Home Assistant, Apple Home, Google Home, or any Matter-compatible smart home platform.
 
 > **Disclaimer:** This entire firmware was written by AI ([Claude](https://claude.ai) by Anthropic). I ([@maui1911](https://github.com/maui1911)) have not read or written a single line of code — I only provided direction, tested on real hardware, and deployed. Use at your own risk.
 
@@ -8,6 +8,8 @@ A Matter-compatible LED strip controller for ESP32-C6 that works over Thread net
 
 - **Matter over Thread** - Native Matter protocol, no cloud or WiFi required
 - **Full RGB + RGBW control** - Color picker, brightness, on/off from your smart home app
+- **Tunable white on SK6812 RGBW** - Warm/cool white (2000K-6500K) via a native color temperature control, using the W LED as the main white source
+- **RGBCCT (WS2805) support** - Tunable white (3000K-6500K) via a native color temperature slider, plus full RGB color
 - **Smooth transitions** - 300ms fades on all changes
 - **Thread mesh networking** - Self-healing network, device acts as a router
 - **Web-based installer** - Flash firmware directly from your browser
@@ -25,8 +27,8 @@ This project was developed for the **[DFRobot Beetle ESP32-C6](https://wiki.dfro
 ### Requirements
 
 - **ESP32-C6 board** - DFRobot Beetle ESP32-C6 recommended (or any ESP32-C6)
-- **Addressable LED strip** - WS2812B, WS2811, or SK6812 (RGBW)
-- **5V power supply** - Size for your LED count (~60mA per LED at full white)
+- **Addressable LED strip** - WS2812B, WS2811, SK6812 (RGBW), or WS2805 (RGBCCT)
+- **Power supply** - 5V for WS2812B/SK6812, 12V or 24V for WS2805; size for your LED count (~60mA per LED at full white on 5V strips)
 - **Thread border router** - HomePod Mini, Apple TV 4K, Google Nest Hub, or dedicated like SLZB-06/SMLight
 
 ### 3D Printable Enclosure
@@ -78,14 +80,17 @@ After reboot, a QR code will appear in the web installer. Scan it with:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| LED Count | 10 | Number of LEDs in your strip (1-1000) |
+| LED Count | 10 | Number of LEDs in your strip (1-1000). For WS2805 this is the number of ICs (addressable groups of ~6 LEDs), not individual LEDs |
 | GPIO Pin | 5 | Data pin connected to LED strip |
-| LED Type | WS2812B | Chipset: WS2812B, WS2811, or SK6812 (RGBW) |
+| LED Type | WS2812B | Chipset: WS2812B, WS2811, SK6812 (RGBW), or WS2805 (RGBCCT) |
 | RGB Order | GRB | Color byte order (try others if colors are wrong) |
 | Max Brightness | 255 | Limits maximum brightness (saves power) |
 | White Mode | accurate | SK6812 RGBW white mixing: accurate, brighter, none, dual, or max |
 | Manual White | 0 | Manual SK6812 white channel level used by none/dual modes |
 | Channel Gains | 255 | Per-channel RGBW calibration gain (0-255) |
+| BIN GPIO | off | WS2805 only: optional GPIO for the BIN backup data line |
+| White Order | ww_cw | WS2805 only: which wire channel is warm vs cool white |
+| White Temp | 4000K | SK6812 only: color temperature of the strip's W LED, used for white mixing |
 | Device Name | TLED | Name shown in your smart home app |
 | Power-on | restore | Behavior on power up: restore last state, on, or off |
 
@@ -101,6 +106,23 @@ GND       ────────  GND
 
 > **Important:** Power your LED strip from an external 5V supply, not from the ESP32's 5V pin (except for very short strips).
 
+### WS2805 (RGBCCT) wiring
+
+WS2805 strips run on 12V or 24V, but the data lines are ordinary logic-level signals - the ESP32-C6 drives them directly. **Never connect the strip's 12/24V to the ESP32.** The grounds must be shared.
+
+```
+ESP32-C6          WS2805 Strip
+─────────         ────────────
+GPIO 5    ────────  DIN (Data In)
+GPIO 4    ────────  BIN (Backup Data In, optional - see below)
+GND       ────────  GND ──── also to Power Supply GND
+                    12V/24V ──── External 12V/24V Power Supply
+```
+
+- **BIN (backup data):** the WS2805 has a second data input that lets the chain survive a single dead IC. Either configure a second GPIO with `set bin <pin>` (the firmware mirrors the exact DIN waveform to it), tie the strip's BIN to DIN at the connector, or leave it unconnected.
+- **Addressability:** one WS2805 IC controls a group of LEDs (typically 6 on 24V strips). Set `leds` to the number of ICs, not the number of LEDs. E.g. a 1m/60-LED 24V strip has 10 ICs → `set leds 10`.
+- **Wrong warm/cool white?** If warm and cool are swapped, run `set white_order cw_ww`.
+
 ## Serial Commands
 
 Connect via USB and use the serial console in the web installer, or any serial terminal at 115200 baud:
@@ -110,8 +132,11 @@ help                    Show available commands
 config                  Show current configuration
 set leds <n>            Set number of LEDs (1-1000)
 set gpio <n>            Set data GPIO pin
-set type <type>         Set LED type (ws2812b/ws2811/sk6812)
+set type <type>         Set LED type (ws2812b/ws2811/sk6812/ws2805)
 set order <order>       Set RGB order (grb/rgb/brg/rbg/bgr/gbr)
+set bin <n|off>         WS2805 BIN backup data GPIO (off = disabled)
+set white_order <o>     WS2805 white channel order (ww_cw/cw_ww)
+set white_temp <k>      SK6812 W LED color temperature in Kelvin (1000-20000)
 set brightness <1-255>  Set max brightness
 set name <name>         Set device name
 set poweron <mode>      Power-on behavior (restore/on/off)
@@ -136,16 +161,29 @@ To match an existing WLED installation, compare these settings first:
 - **RGB order:** use `set order grb|rgb|brg|rbg|bgr|gbr` until red, green, and blue match.
 - **Brightness limiter:** match WLED's current limit with `set brightness <1-255>`, or leave both unlimited for calibration.
 - **White, gamma, and correction:** TLED applies only manual white and linear per-channel gains; disable WLED color correction/gamma while matching, or compensate with `gain_r`, `gain_g`, `gain_b`, and `gain_w`.
-- **Matter capability changes:** if a firmware update changes exposed Matter capabilities, remove and re-pair the device in your Matter controller after flashing.
+- **Matter capability changes:** if a firmware update changes exposed Matter capabilities, Home Assistant keeps the old ones until you run **Re-interview device** and then reload the Matter integration. Other controllers may need the device removed and re-paired.
 
-TLED does not currently expose Matter Color Temperature for RGBW white control. The current Matter endpoint is HSV/RGB brightness only, so this change keeps white mixing in firmware configuration instead of adding a new Color Temperature capability.
+### SK6812 color temperature
+
+Matter has no RGBW channel, so TLED exposes the W LED through a native Matter **Color Temperature** control (153-500 mireds ≈ 6500K-2000K) alongside the color picker. The W LED is the main white source and RGB only fills in what it cannot reach, so output is pure W at the strip's native temperature. Tell TLED what that is with `set white_temp <kelvin>`; warm white strips are typically around 3000K, cool white around 6000K.
+
+The `white_mode`, `white` and gain settings apply to color mode; the channel gains and brightness limit apply in color temperature mode too.
+
+### WS2805 color temperature
+
+WS2805 strips have dedicated warm (3000K) and cool (6500K) white channels, so TLED exposes a native Matter **Color Temperature** control (153-333 mireds ≈ 6500K-3000K) alongside the color picker:
+
+- **White/CT mode:** the warm and cool channels are mixed to hit the requested temperature; RGB stays off.
+- **Color mode:** RGB renders the chosen color; the white channels stay off.
+
+> **Note:** switching between a strip with a white source (`sk6812`, `ws2805`) and one without changes the device's Matter clusters. Remove and re-add the device in your smart home app after changing it.
 
 ## Building from Source
 
 ### Prerequisites
 
-- [ESP-IDF v5.4+](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/get-started/)
-- [ESP-Matter](https://github.com/espressif/esp-matter)
+- [ESP-IDF v5.4.1](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c6/get-started/)
+- [ESP-Matter](https://github.com/espressif/esp-matter) at commit `1f50e4e` (main, February 2026). Older releases such as `release/v1.4.2` do not build: the color temperature API differs.
 
 ### Build & Flash
 
@@ -204,6 +242,7 @@ TLED/
 ├── main/
 │   ├── app_main.cpp            # Matter setup, endpoint creation
 │   ├── app_driver.cpp          # LED strip driver, transitions, effects
+│   ├── ws2805_strip.c          # WS2805 5-channel (RGBCCT) RMT driver
 │   ├── app_nvs_config.cpp      # Runtime configuration storage
 │   ├── app_serial_config.cpp   # USB serial command interface
 │   ├── app_monitoring.cpp      # Health monitoring, watchdog, temperature
