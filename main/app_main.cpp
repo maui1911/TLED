@@ -383,7 +383,7 @@ extern "C" void app_main()
 
     /* Create Temperature Sensor endpoint to expose chip temperature */
     temperature_sensor::config_t temp_config;
-    // ESP32-C6 internal sensor range: -10°C to 80°C (in 0.01°C units)
+    // ESP32-C6/H2 internal sensor range: -10°C to 80°C (in 0.01°C units)
     temp_config.temperature_measurement.min_measured_value = nullable<int16_t>(-1000);  // -10°C
     temp_config.temperature_measurement.max_measured_value = nullable<int16_t>(8000);   // 80°C
     // Initial value will be set when first reading comes in

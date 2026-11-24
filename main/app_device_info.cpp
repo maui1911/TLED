@@ -8,6 +8,7 @@
 #include <platform/DeviceInstanceInfoProvider.h>
 #include <lib/support/CodeUtils.h>
 #include <cstring>
+#include <sdkconfig.h>
 #include <esp_log.h>
 #include <esp_matter_providers.h>
 
@@ -18,7 +19,11 @@ namespace tled {
 // Device identification constants
 static constexpr char kVendorName[] = "TLED";
 static constexpr char kProductName[] = "Matter LED Controller";
+#if CONFIG_IDF_TARGET_ESP32H2
+static constexpr char kHardwareVersionString[] = "ESP32-H2";
+#else
 static constexpr char kHardwareVersionString[] = "ESP32-C6";
+#endif
 static constexpr char kProductURL[] = "https://github.com/maui1911/TLED";
 static constexpr char kProductLabel[] = "TLED";
 static constexpr uint16_t kVendorId = 0xFFF1;  // Test vendor ID

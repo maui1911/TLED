@@ -4,6 +4,7 @@
  */
 
 #include "app_nvs_config.h"
+#include <sdkconfig.h>
 #include <string.h>
 #include <nvs_flash.h>
 #include <nvs.h>
@@ -19,9 +20,16 @@ static const char *TAG = "tled_config";
 #define TLED_CONFIG_VERSION_RGBW 3
 #define TLED_CONFIG_VERSION_WS2805 4
 
+#if CONFIG_IDF_TARGET_ESP32H2
+// Valid GPIO pins for ESP32-H2 LED data output (the H2 has GPIO0-5, 8-14, 22-27)
+// Avoiding: 8 (strapping/onboard RGB LED on dev boards), 9 (boot button),
+//           25 (strapping), 26-27 (USB)
+static const uint8_t valid_gpio_pins[] = {0, 1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 22, 23, 24};
+#else
 // Valid GPIO pins for ESP32-C6 LED data output
 // Avoiding: 9 (boot button), 12-13 (USB), 15 (onboard LED)
 static const uint8_t valid_gpio_pins[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 14, 18, 19, 20, 21, 22, 23};
+#endif
 #define NUM_VALID_GPIOS (sizeof(valid_gpio_pins) / sizeof(valid_gpio_pins[0]))
 
 // Current configuration (in RAM)

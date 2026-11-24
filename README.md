@@ -29,6 +29,16 @@ This project was developed for the **[DFRobot Beetle ESP32-C6](https://wiki.dfro
 - **Power supply** - 5V for WS2812B/SK6812, 12V or 24V for WS2805; size for your LED count (~60mA per LED at full white on 5V strips)
 - **Thread border router** - HomePod Mini, Apple TV 4K, Google Nest Hub, or dedicated like SLZB-06/SMLight
 
+### ESP32-H2 support
+
+The **ESP32-H2** (e.g. ESP32-H2-DevKitM-1, ESP32-H2 SuperMini boards, or an ESP32-H2-MINI-1 module on your own PCB) can be built from source. It has Thread (802.15.4) and BLE like the C6, but no Wi-Fi, which TLED does not use anyway. Differences to be aware of:
+
+- **Build from source only:** the web installer currently serves the ESP32-C6 build. Follow [Building for ESP32-H2](#building-for-esp32-h2).
+- **Data pin:** GPIO 5 (the default) works on H2 boards that break it out. Usable pins are 0-5, 10-14 and 22-24; GPIO 8 (strapping / onboard LED on many boards), 9 (BOOT), 25 (strapping) and 26-27 (USB) are rejected.
+- **Serial configuration needs native USB:** the `set ...` commands and the web configurator use the chip's USB Serial/JTAG port. An H2 board that only routes a USB-to-UART bridge to UART0 cannot use them; use the BLE configuration instead.
+- **Resources:** the H2 runs at 96 MHz with 320 KB RAM (C6: 160 MHz, 512 KB) and 4 MB flash. The existing partition table fits, but check free heap during commissioning (the log prints it).
+- **Enclosure:** the 3D-printable enclosure is sized for the Beetle ESP32-C6 only.
+
 ### 3D Printable Enclosure
 
 A parametric OpenSCAD enclosure design is included in the `enclosure/` folder, sized specifically for the DFRobot Beetle ESP32-C6.
@@ -203,6 +213,24 @@ idf.py -p /dev/ttyACM0 erase-flash flash
 idf.py -p /dev/ttyACM0 monitor
 ```
 
+### Building for ESP32-H2
+
+```bash
+source ~/esp/esp-idf/export.sh
+source ~/esp/esp-matter/export.sh
+
+# Switches the target and regenerates sdkconfig from sdkconfig.defaults
+# + sdkconfig.defaults.esp32h2. This rewrites the committed (C6) sdkconfig,
+# so don't commit that change.
+idf.py set-target esp32h2
+idf.py build
+idf.py -p /dev/ttyACM0 flash monitor
+```
+
+To go back to the C6, run `git checkout sdkconfig` and `idf.py set-target esp32c6`.
+
+`device/esp_matter_device.cmake` picks an ESP32-H2 device directory from your esp-matter checkout (`device_hal/device/`); if the build stops with a message about that, see the comment in that file.
+
 ### Configuration via menuconfig
 
 ```bash
@@ -255,7 +283,8 @@ TLED/
 │   ├── tled_base.stl           # Pre-exported base STL
 │   └── tled_lid.stl            # Pre-exported lid STL
 ├── partitions.csv              # Flash partition layout
-└── sdkconfig.defaults          # Default SDK configuration
+├── sdkconfig.defaults          # Default SDK configuration
+└── sdkconfig.defaults.esp32h2  # ESP32-H2 overrides (applied on top of the defaults)
 ```
 
 ## License

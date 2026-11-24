@@ -5,6 +5,7 @@
 
 #include "app_serial_config.h"
 #include "app_nvs_config.h"
+#include "app_config.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -167,7 +168,7 @@ static void print_help(void) {
     serial_write("  help              - Show this help\r\n");
     serial_write("  config            - Show current configuration\r\n");
     serial_write("  set leds <n>      - Set number of LEDs (1-1000)\r\n");
-    serial_write("  set gpio <n>      - Set data GPIO pin (0-21)\r\n");
+    serial_write("  set gpio <n>      - Set data GPIO pin (" TLED_GPIO_RANGE_TEXT ")\r\n");
     serial_write("  set brightness <n> - Set max brightness (1-255)\r\n");
     serial_write("  set type <t>      - Set LED type: ws2812b, ws2811, sk6812, ws2805\r\n");
     serial_write("  set order <o>     - Set RGB order: grb, rgb, brg, rbg, bgr, gbr\r\n");
@@ -276,7 +277,7 @@ static void handle_set_command(const char *param, const char *value) {
     else if (strcmp(param, "gpio") == 0) {
         int n = atoi(value);
         if (!tled_config_validate_gpio((uint8_t)n)) {
-            serial_write("Error: invalid GPIO pin (avoid 9, 12-13, 15)\r\n");
+            serial_write("Error: invalid GPIO pin (avoid " TLED_GPIO_AVOID_TEXT ")\r\n");
         } else if (cfg->bin_gpio != TLED_BIN_GPIO_DISABLED && (uint8_t)n == cfg->bin_gpio) {
             serial_printf("Error: GPIO %d is already used as BIN pin (run 'set bin off' first)\r\n", n);
         } else {
@@ -324,7 +325,7 @@ static void handle_set_command(const char *param, const char *value) {
                 cfg->bin_gpio = n;
                 serial_printf("Set bin = %d\r\n", n);
             } else {
-                serial_write("Error: invalid BIN GPIO (avoid 9, 12-13, 15 and the data pin)\r\n");
+                serial_write("Error: invalid BIN GPIO (avoid " TLED_GPIO_AVOID_TEXT " and the data pin)\r\n");
             }
         }
     }

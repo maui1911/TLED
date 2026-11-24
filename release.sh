@@ -17,6 +17,13 @@ VERSION="${VERSION#v}"
 
 echo "=== Releasing TLED v${VERSION} ==="
 
+# manifest.json and the release asset are the ESP32-C6 build. Refuse to publish
+# an ESP32-H2 (or other target) build as if it were the C6 firmware.
+if ! grep -q '^CONFIG_IDF_TARGET="esp32c6"' sdkconfig 2>/dev/null; then
+    echo "Error: sdkconfig is not configured for esp32c6. Run 'idf.py set-target esp32c6' first."
+    exit 1
+fi
+
 # Ensure we're on main and up to date
 BRANCH=$(git branch --show-current)
 if [ "$BRANCH" != "main" ]; then
