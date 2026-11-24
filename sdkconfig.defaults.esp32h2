@@ -1,0 +1,14 @@
+# TLED - ESP32-H2 overrides
+# ESP-IDF applies this file after sdkconfig.defaults when the target is esp32h2
+# (idf.py set-target esp32h2).
+
+# Target (overrides the esp32c6 line in sdkconfig.defaults)
+CONFIG_IDF_TARGET="esp32h2"
+
+# Notes for H2 vs C6 (nothing to set here unless testing shows a need):
+# - The H2 has no Wi-Fi; TLED is already Thread-only (CONFIG_ENABLE_WIFI_STATION=n).
+# - CPU is 96 MHz (C6: 160 MHz) and RAM is 320 KB (C6: 512 KB). If free heap gets
+#   tight during commissioning or OTA, reduce the stack sizes and options in
+#   sdkconfig.defaults (CHIP_TASK_STACK_SIZE, THREAD_TASK_STACK_SIZE,
+#   CONFIG_ENABLE_CHIP_SHELL) and re-test.
+# - Boot button is GPIO9 on H2 dev boards, same as the C6 setting in sdkconfig.defaults.

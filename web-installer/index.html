@@ -933,7 +933,7 @@
                         </div>
                         <div class="config-item">
                             <label for="gpioPin">GPIO Pin</label>
-                            <input type="number" id="gpioPin" min="0" max="21" value="5">
+                            <input type="number" id="gpioPin" min="0" max="24" value="5">
                         </div>
                     </div>
 
@@ -1031,7 +1031,7 @@
                 <h2>Requirements</h2>
                 <div class="help-section">
                     <ul>
-                        <li><strong>ESP32-C6 board</strong> with USB-C (e.g., DFRobot Beetle)</li>
+                        <li><strong>ESP32-C6 board</strong> with USB-C (e.g., DFRobot Beetle). ESP32-H2 boards can be built from source (see the README)</li>
                         <li><strong>Addressable LEDs</strong> - WS2812B, WS2811, or SK6812</li>
                         <li><strong>5V power supply</strong> - ~60mA per LED at full white</li>
                         <li><strong>Thread border router</strong> - HomePod Mini, Apple TV 4K, or SLZB-06</li>
@@ -1044,7 +1044,7 @@
                 <h2>Configuration Options</h2>
                 <div class="help-section">
                     <p><strong>Number of LEDs</strong> - Total LEDs in your strip (1-1000)</p>
-                    <p><strong>GPIO Pin</strong> - Data pin for the LED strip. GPIO 5 works on most ESP32-C6 boards.</p>
+                    <p><strong>GPIO Pin</strong> - Data pin for the LED strip. GPIO 5 works on most ESP32-C6 and ESP32-H2 boards.</p>
                     <p><strong>LED Type</strong></p>
                     <ul>
                         <li><code>WS2812B</code> - Most common, 800kHz</li>

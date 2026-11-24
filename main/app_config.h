@@ -11,9 +11,20 @@
 #include "esp_openthread_types.h"
 #endif
 
-// Hardware Configuration - DFRobot Beetle ESP32-C6
-#define TLED_ONBOARD_LED_GPIO   15      // Onboard LED (fallback)
-#define TLED_BOOT_BUTTON_GPIO   9       // Boot button
+// Hardware Configuration - DFRobot Beetle ESP32-C6 (reference board)
+// The ESP32-H2 is also supported; its dev boards use the same boot button pin.
+#define TLED_ONBOARD_LED_GPIO   15      // Onboard LED (fallback, C6 Beetle only)
+#define TLED_BOOT_BUTTON_GPIO   9       // Boot button (C6 and H2)
+
+// Text shown in serial command help/errors for the data GPIO pin. Must stay in
+// sync with valid_gpio_pins[] in app_nvs_config.cpp.
+#if CONFIG_IDF_TARGET_ESP32H2
+#define TLED_GPIO_RANGE_TEXT    "0-5, 10-14, 22-24"
+#define TLED_GPIO_AVOID_TEXT    "8, 9, 25-27"
+#else
+#define TLED_GPIO_RANGE_TEXT    "0-21"
+#define TLED_GPIO_AVOID_TEXT    "9, 12-13, 15"
+#endif
 
 // Color remapping constants (Matter uses 0-254 range)
 #define MATTER_BRIGHTNESS_MAX   254
@@ -51,7 +62,7 @@
 #define TLED_DEVICE_NAME        "TLED"
 #define TLED_VENDOR_NAME        "TLED Project"
 
-// OpenThread configuration for ESP32-C6 native radio
+// OpenThread configuration for the native 802.15.4 radio (ESP32-C6 and ESP32-H2)
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
 #define ESP_OPENTHREAD_DEFAULT_RADIO_CONFIG()                                           \
     {                                                                                   \

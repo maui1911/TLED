@@ -346,7 +346,7 @@ extern "C" void app_main()
     /* Add ColorControl cluster with HSV, plus Color Temperature on strips with a
      * white source. Matter has no RGBW/white channel concept, so a warm/cool
      * white control is only reachable through the Color Temperature feature. */
-    bool has_white_source = (config->chipset == CHIPSET_WS2805 || config->chipset == CHIPSET_SK6812);
+    bool has_white_source = (tled_config_is_cct(config) || tled_config_is_rgbw(config));
 
     cluster::color_control::config_t color_config;
     color_config.color_mode = static_cast<uint8_t>(ColorControl::ColorModeEnum::kCurrentHueAndCurrentSaturation);
@@ -367,7 +367,7 @@ extern "C" void app_main()
      * Note: adding/removing this feature changes the cluster shape, so switching
      * strip type to/from one with a white source requires re-commissioning. */
     if (has_white_source) {
-        uint16_t ct_max_mireds = (config->chipset == CHIPSET_SK6812) ? TLED_RGBW_CT_MAX_MIREDS : TLED_CT_MAX_MIREDS;
+        uint16_t ct_max_mireds = tled_config_is_rgbw(config) ? TLED_RGBW_CT_MAX_MIREDS : TLED_CT_MAX_MIREDS;
         cluster::color_control::feature::color_temperature::config_t ct_config;
         ct_config.color_temperature_mireds = TLED_DEFAULT_CT_MIREDS;
         ct_config.color_temp_physical_min_mireds = TLED_CT_MIN_MIREDS;
@@ -383,7 +383,7 @@ extern "C" void app_main()
 
     /* Create Temperature Sensor endpoint to expose chip temperature */
     temperature_sensor::config_t temp_config;
-    // ESP32-C6 internal sensor range: -10°C to 80°C (in 0.01°C units)
+    // ESP32-C6/H2 internal sensor range: -10°C to 80°C (in 0.01°C units)
     temp_config.temperature_measurement.min_measured_value = nullable<int16_t>(-1000);  // -10°C
     temp_config.temperature_measurement.max_measured_value = nullable<int16_t>(8000);   // 80°C
     // Initial value will be set when first reading comes in

@@ -13,11 +13,15 @@ menu "TLED Configuration"
     config TLED_GPIO_PIN
         int "LED data GPIO pin"
         default 5
-        range 0 21
+        range 0 21 if IDF_TARGET_ESP32C6
+        range 0 24 if IDF_TARGET_ESP32H2
         help
             GPIO pin connected to the LED strip data line.
-            Default is GPIO5 for DFRobot Beetle ESP32-C6.
-            Avoid: GPIO9 (boot button), GPIO12-13 (USB), GPIO15 (onboard LED).
+            Default is GPIO5 (DFRobot Beetle ESP32-C6, ESP32-H2 dev boards).
+            ESP32-C6: avoid GPIO9 (boot button), GPIO12-13 (USB), GPIO15 (onboard LED).
+            ESP32-H2: avoid GPIO8, GPIO9 (boot button), GPIO25 (strapping),
+            GPIO26-27 (USB), and any pin your board uses for an onboard LED.
+            Only some pins are broken out on small boards: check your pinout.
 
     config TLED_MAX_BRIGHTNESS
         int "Maximum brightness (0-255)"
@@ -42,21 +46,71 @@ menu "TLED Configuration"
             bool "SK6812 (RGBW)"
         config TLED_LED_WS2805
             bool "WS2805 (RGB + warm/cool white)"
+        config TLED_LED_ANALOG_RGB
+            bool "Analog RGB (PWM, one GPIO per colour)"
     endchoice
+
+    config TLED_ANALOG_PIN_R
+        int "Analog RGB: red PWM GPIO"
+        depends on TLED_LED_ANALOG_RGB
+        default 10
+        range 0 24
+        help
+            GPIO driving the red channel's MOSFET gate (active high).
+
+    config TLED_ANALOG_PIN_G
+        int "Analog RGB: green PWM GPIO"
+        depends on TLED_LED_ANALOG_RGB
+        default 11
+        range 0 24
+        help
+            GPIO driving the green channel's MOSFET gate (active high).
+
+    config TLED_ANALOG_PIN_W
+        int "Analog: first white PWM GPIO (-1 = none)"
+        depends on TLED_LED_ANALOG_RGB
+        default -1
+        range -1 24
+        help
+            Optional white channel. With only this pin the light is treated as
+            RGBW (like SK6812). Set -1 for an RGB-only light.
+
+    config TLED_ANALOG_PIN_W2
+        int "Analog: second white PWM GPIO (-1 = none)"
+        depends on TLED_LED_ANALOG_RGB
+        default -1
+        range -1 24
+        help
+            Optional second white channel (needs the first). With both pins the
+            light is treated as RGB + warm white + cool white (like WS2805):
+            first = warm, second = cool unless 'set white_order cw_ww'.
+
+    config TLED_ANALOG_PIN_B
+        int "Analog RGB: blue PWM GPIO"
+        depends on TLED_LED_ANALOG_RGB
+        default 12 if IDF_TARGET_ESP32H2
+        default 14
+        range 0 24
+        help
+            GPIO driving the blue channel's MOSFET gate (active high).
+            Pick pins that are broken out on your board and not reserved
+            (ESP32-H2: avoid 8, 9, 25-27).
 
     config TLED_WS2805_BIN_GPIO
         int "WS2805 BIN (backup data) GPIO pin (-1 = disabled)"
         depends on TLED_LED_WS2805
         default -1
-        range -1 23
+        range -1 23 if IDF_TARGET_ESP32C6
+        range -1 24 if IDF_TARGET_ESP32H2
         help
             Optional GPIO for the WS2805 BIN (DIN2) backup data line.
             The same waveform as DIN is mirrored to this pin, so the strip
             keeps working even if a single IC in the chain fails.
             Set to -1 to disable (tie the strip's BIN to DIN externally,
             or leave it unconnected).
-            Avoid reserved pins: GPIO9 (boot button), GPIO12-13 (USB),
-            GPIO15 (onboard LED), and the pin used for TLED_GPIO_PIN.
+            Avoid reserved pins: GPIO9 (boot button), GPIO12-13 (USB on C6),
+            GPIO15 (onboard LED on C6), GPIO8/25-27 on H2, and the pin used
+            for TLED_GPIO_PIN.
             The serial 'set bin' command enforces this; menuconfig does not.
 
     choice TLED_RGB_ORDER

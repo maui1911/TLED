@@ -29,6 +29,46 @@ This project was developed for the **[DFRobot Beetle ESP32-C6](https://wiki.dfro
 - **Power supply** - 5V for WS2812B/SK6812, 12V or 24V for WS2805; size for your LED count (~60mA per LED at full white on 5V strips)
 - **Thread border router** - HomePod Mini, Apple TV 4K, Google Nest Hub, or dedicated like SLZB-06/SMLight
 
+### ESP32-H2 support
+
+The **ESP32-H2** (e.g. ESP32-H2-DevKitM-1, ESP32-H2 SuperMini boards, or an ESP32-H2-MINI-1 module on your own PCB) can be built from source. It has Thread (802.15.4) and BLE like the C6, but no Wi-Fi, which TLED does not use anyway. Differences to be aware of:
+
+- **Build from source only:** the web installer currently serves the ESP32-C6 build. Follow [Building for ESP32-H2](#building-for-esp32-h2).
+- **Data pin:** GPIO 5 (the default) works on H2 boards that break it out. Usable pins are 0-5, 10-14 and 22-24; GPIO 8 (strapping / onboard LED on many boards), 9 (BOOT), 25 (strapping) and 26-27 (USB) are rejected.
+- **Serial configuration needs native USB:** the `set ...` commands and the web configurator use the chip's USB Serial/JTAG port. An H2 board that only routes a USB-to-UART bridge to UART0 cannot use them; use the BLE configuration instead.
+- **Resources:** the H2 runs at 96 MHz with 320 KB RAM (C6: 160 MHz, 512 KB) and 4 MB flash. The existing partition table fits, but check free heap during commissioning (the log prints it).
+- **Enclosure:** the 3D-printable enclosure is sized for the Beetle ESP32-C6 only.
+
+### Analog RGB lights (PWM, no data line)
+
+Besides addressable strips, TLED can drive a plain **analog RGB light**, for example the lamp driver board from an IKEA Iskarna or a 4-wire RGB strip on a shared positive rail. Each colour is dimmed by PWM on its own GPIO, which switches a low-side N-channel MOSFET (active high, gamma-corrected, 4 kHz, 10-bit). The whole light is one colour: there is no per-LED addressing, so `leds` is ignored.
+
+```
+set type analog
+set pin_r 10
+set pin_g 11
+set pin_b 12
+save
+```
+
+Optional white channels (reuses the SK6812 / WS2805 behaviour):
+
+| Wired channels | Behaves like | Settings that apply |
+|---|---|---|
+| R, G, B | WS2812B | `order`, `gain_r/g/b` |
+| R, G, B + `pin_w` | SK6812 RGBW | `white_mode`, `white`, `white_temp`, `gain_w`, colour temperature |
+| R, G, B + `pin_w` + `pin_w2` | WS2805 (warm + cool white) | `white_order`, `gain_w`, colour temperature |
+
+```
+set pin_w 4          # one white channel
+set pin_w2 5         # optional second white (pin_w = warm, pin_w2 = cool)
+set pin_w off        # remove a white channel
+```
+
+Adding or removing white channels changes the Matter colour-temperature cluster, so remove and re-add the device in your smart home app. Wrong colours? Use `set order` to swap channels. The same pins can be set at build time under menuconfig → TLED Configuration → "Analog RGB".
+
+**Hardware:** the GPIOs drive MOSFET gates, never the load. Use logic-level MOSFETs (fully on at 3.3 V gate drive) with a pull-down on each gate, and share ground with the ESP32. Do not connect the lamp supply (12/24 V) to the ESP32.
+
 ### 3D Printable Enclosure
 
 A parametric OpenSCAD enclosure design is included in the `enclosure/` folder, sized specifically for the DFRobot Beetle ESP32-C6.
@@ -203,6 +243,24 @@ idf.py -p /dev/ttyACM0 erase-flash flash
 idf.py -p /dev/ttyACM0 monitor
 ```
 
+### Building for ESP32-H2
+
+```bash
+source ~/esp/esp-idf/export.sh
+source ~/esp/esp-matter/export.sh
+
+# Switches the target and regenerates sdkconfig from sdkconfig.defaults
+# + sdkconfig.defaults.esp32h2. This rewrites the committed (C6) sdkconfig,
+# so don't commit that change.
+idf.py set-target esp32h2
+idf.py build
+idf.py -p /dev/ttyACM0 flash monitor
+```
+
+To go back to the C6, run `git checkout sdkconfig` and `idf.py set-target esp32c6`.
+
+`device/esp_matter_device.cmake` picks an ESP32-H2 device directory from your esp-matter checkout (`device_hal/device/`); if the build stops with a message about that, see the comment in that file.
+
 ### Configuration via menuconfig
 
 ```bash
@@ -241,6 +299,7 @@ TLED/
 │   ├── app_main.cpp            # Matter setup, endpoint creation
 │   ├── app_driver.cpp          # LED strip driver, transitions, effects
 │   ├── ws2805_strip.c          # WS2805 5-channel (RGBCCT) RMT driver
+│   ├── analog_rgb.c            # Analog RGB(+W) PWM driver (LEDC)
 │   ├── app_nvs_config.cpp      # Runtime configuration storage
 │   ├── app_serial_config.cpp   # USB serial command interface
 │   ├── app_monitoring.cpp      # Health monitoring, watchdog, temperature
@@ -255,7 +314,8 @@ TLED/
 │   ├── tled_base.stl           # Pre-exported base STL
 │   └── tled_lid.stl            # Pre-exported lid STL
 ├── partitions.csv              # Flash partition layout
-└── sdkconfig.defaults          # Default SDK configuration
+├── sdkconfig.defaults          # Default SDK configuration
+└── sdkconfig.defaults.esp32h2  # ESP32-H2 overrides (applied on top of the defaults)
 ```
 
 ## License
