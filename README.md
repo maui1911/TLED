@@ -39,6 +39,36 @@ The **ESP32-H2** (e.g. ESP32-H2-DevKitM-1, ESP32-H2 SuperMini boards, or an ESP3
 - **Resources:** the H2 runs at 96 MHz with 320 KB RAM (C6: 160 MHz, 512 KB) and 4 MB flash. The existing partition table fits, but check free heap during commissioning (the log prints it).
 - **Enclosure:** the 3D-printable enclosure is sized for the Beetle ESP32-C6 only.
 
+### Analog RGB lights (PWM, no data line)
+
+Besides addressable strips, TLED can drive a plain **analog RGB light**, for example the lamp driver board from an IKEA Iskarna or a 4-wire RGB strip on a shared positive rail. Each colour is dimmed by PWM on its own GPIO, which switches a low-side N-channel MOSFET (active high, gamma-corrected, 4 kHz, 10-bit). The whole light is one colour: there is no per-LED addressing, so `leds` is ignored.
+
+```
+set type analog
+set pin_r 10
+set pin_g 11
+set pin_b 12
+save
+```
+
+Optional white channels (reuses the SK6812 / WS2805 behaviour):
+
+| Wired channels | Behaves like | Settings that apply |
+|---|---|---|
+| R, G, B | WS2812B | `order`, `gain_r/g/b` |
+| R, G, B + `pin_w` | SK6812 RGBW | `white_mode`, `white`, `white_temp`, `gain_w`, colour temperature |
+| R, G, B + `pin_w` + `pin_w2` | WS2805 (warm + cool white) | `white_order`, `gain_w`, colour temperature |
+
+```
+set pin_w 4          # one white channel
+set pin_w2 5         # optional second white (pin_w = warm, pin_w2 = cool)
+set pin_w off        # remove a white channel
+```
+
+Adding or removing white channels changes the Matter colour-temperature cluster, so remove and re-add the device in your smart home app. Wrong colours? Use `set order` to swap channels. The same pins can be set at build time under menuconfig → TLED Configuration → "Analog RGB".
+
+**Hardware:** the GPIOs drive MOSFET gates, never the load. Use logic-level MOSFETs (fully on at 3.3 V gate drive) with a pull-down on each gate, and share ground with the ESP32. Do not connect the lamp supply (12/24 V) to the ESP32.
+
 ### 3D Printable Enclosure
 
 A parametric OpenSCAD enclosure design is included in the `enclosure/` folder, sized specifically for the DFRobot Beetle ESP32-C6.
@@ -269,6 +299,7 @@ TLED/
 │   ├── app_main.cpp            # Matter setup, endpoint creation
 │   ├── app_driver.cpp          # LED strip driver, transitions, effects
 │   ├── ws2805_strip.c          # WS2805 5-channel (RGBCCT) RMT driver
+│   ├── analog_rgb.c            # Analog RGB(+W) PWM driver (LEDC)
 │   ├── app_nvs_config.cpp      # Runtime configuration storage
 │   ├── app_serial_config.cpp   # USB serial command interface
 │   ├── app_monitoring.cpp      # Health monitoring, watchdog, temperature

@@ -20,6 +20,7 @@
 #include "app_config.h"
 #include "app_nvs_config.h"
 #include "ws2805_strip.h"
+#include "analog_rgb.h"
 
 #include <iot_button.h>
 #include <button_gpio.h>
@@ -84,7 +85,9 @@ typedef struct {
 typedef struct {
     led_strip_handle_t strip;
     ws2805_strip_handle_t ws2805;   // Set instead of strip for WS2805 chipset
+    analog_rgb_handle_t analog;     // Set instead of strip for the analog RGB (PWM) chipset
     bool is_rgbw;
+    bool has_cct;                   // Two white channels (WS2805, or analog with W + W2)
     bool power;
     uint8_t brightness;     // 0-254 (Matter range)
     uint8_t hue;            // 0-254 (Matter range)
@@ -129,7 +132,9 @@ typedef struct {
 static light_driver_t s_light_driver = {
     .strip = NULL,
     .ws2805 = NULL,
+    .analog = NULL,
     .is_rgbw = false,
+    .has_cct = false,
     .power = false,
     .brightness = 127,
     .hue = 0,
@@ -447,6 +452,41 @@ static esp_err_t driver_set_pixel(light_driver_t *driver, int index,
                                    uint8_t r, uint8_t g, uint8_t b,
                                    uint8_t ww, uint8_t cw)
 {
+    if (driver->analog != NULL) {
+        // One analog light = one "pixel". Channel gains and the RGB order setting
+        // still apply, so swapped wiring can be fixed with 'set order'.
+        if (index != 0) {
+            return ESP_OK;
+        }
+        uint8_t mr, mg, mb;
+        if (driver->has_cct) {
+            // RGB + warm + cool white: same mapping as WS2805
+            uint8_t gr = tled_apply_channel_gain(r, driver->gain_r);
+            uint8_t gg = tled_apply_channel_gain(g, driver->gain_g);
+            uint8_t gb = tled_apply_channel_gain(b, driver->gain_b);
+            remap_rgb_order(driver->rgb_order, gr, gg, gb, &mr, &mg, &mb);
+            uint8_t w1 = (driver->white_order == WHITE_ORDER_CW_WW) ? cw : ww;
+            uint8_t w2 = (driver->white_order == WHITE_ORDER_CW_WW) ? ww : cw;
+            return analog_rgb_set(driver->analog, mr, mg, mb, w1, w2);
+        }
+        if (driver->is_rgbw) {
+            // RGBW: same white extraction as SK6812
+            tled_rgbw_color_t rgbw = tled_rgb_to_rgbw(r, g, b,
+                                                      driver->white_mode,
+                                                      driver->manual_white,
+                                                      driver->gain_r,
+                                                      driver->gain_g,
+                                                      driver->gain_b,
+                                                      driver->gain_w);
+            remap_rgb_order(driver->rgb_order, rgbw.r, rgbw.g, rgbw.b, &mr, &mg, &mb);
+            return analog_rgb_set(driver->analog, mr, mg, mb, rgbw.w, 0);
+        }
+        uint8_t gr = tled_apply_channel_gain(r, driver->gain_r);
+        uint8_t gg = tled_apply_channel_gain(g, driver->gain_g);
+        uint8_t gb = tled_apply_channel_gain(b, driver->gain_b);
+        remap_rgb_order(driver->rgb_order, gr, gg, gb, &mr, &mg, &mb);
+        return analog_rgb_set(driver->analog, mr, mg, mb, 0, 0);
+    }
     if (driver->ws2805 != NULL) {
         // Apply channel gains and RGB order remapping, then map the white
         // channels onto W1/W2 according to the configured wiring order
@@ -481,6 +521,9 @@ static esp_err_t driver_set_pixel(light_driver_t *driver, int index,
 // Transmit the frame buffer to whichever strip driver is active
 static esp_err_t driver_refresh(light_driver_t *driver)
 {
+    if (driver->analog != NULL) {
+        return analog_rgb_refresh(driver->analog);
+    }
     if (driver->ws2805 != NULL) {
         return ws2805_strip_refresh(driver->ws2805);
     }
@@ -491,7 +534,7 @@ static esp_err_t driver_refresh(light_driver_t *driver)
 static esp_err_t update_strip_channels(light_driver_t *driver, uint8_t r, uint8_t g, uint8_t b,
                                        uint8_t ww, uint8_t cw)
 {
-    if (driver->strip == NULL && driver->ws2805 == NULL) {
+    if (driver->strip == NULL && driver->ws2805 == NULL && driver->analog == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -513,6 +556,12 @@ static esp_err_t update_strip_rgb(light_driver_t *driver, uint8_t r, uint8_t g, 
 static esp_err_t update_strip_rgbw(light_driver_t *driver,
                                    uint8_t r, uint8_t g, uint8_t b, uint8_t w)
 {
+    if (driver->analog != NULL) {
+        uint8_t ar, ag, ab;
+        remap_rgb_order(driver->rgb_order, r, g, b, &ar, &ag, &ab);
+        analog_rgb_set(driver->analog, ar, ag, ab, w, 0);
+        return analog_rgb_refresh(driver->analog);
+    }
     if (driver->strip == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -590,7 +639,7 @@ static void compute_output_channels(light_driver_t *driver,
     *r = *g = *b = 0;
     *ww = *cw = 0;
 
-    if (driver->color_mode == COLOR_MODE_CT && driver->ws2805 != NULL) {
+    if (driver->color_mode == COLOR_MODE_CT && driver->has_cct) {
         uint8_t level = (uint8_t)(((uint16_t)val * 255) / STANDARD_BRIGHTNESS_MAX);
         // Apply max_brightness limit to the white channels as well
         if (driver->max_brightness < 255) {
@@ -656,7 +705,7 @@ static float lerp(float from, float to, float t)
 // Rainbow effect - cycle through hues
 static void effect_rainbow(light_driver_t *driver)
 {
-    if (driver->strip == NULL && driver->ws2805 == NULL) return;
+    if (driver->strip == NULL && driver->ws2805 == NULL && driver->analog == NULL) return;
 
     // Use effect_step as hue offset
     uint16_t base_hue = driver->effect_step % 360;
@@ -675,7 +724,7 @@ static void effect_rainbow(light_driver_t *driver)
 // Breathing effect - pulse brightness
 static void effect_breathing(light_driver_t *driver)
 {
-    if (driver->strip == NULL && driver->ws2805 == NULL) return;
+    if (driver->strip == NULL && driver->ws2805 == NULL && driver->analog == NULL) return;
 
     // Sine wave for smooth breathing
     float phase = (float)(driver->effect_step % 360) * 3.14159f / 180.0f;
@@ -700,7 +749,7 @@ static void effect_breathing(light_driver_t *driver)
 // Candle flicker effect
 static void effect_candle(light_driver_t *driver)
 {
-    if (driver->strip == NULL && driver->ws2805 == NULL) return;
+    if (driver->strip == NULL && driver->ws2805 == NULL && driver->analog == NULL) return;
 
     // Random flicker with warm color
     uint8_t max_val = (driver->brightness * STANDARD_BRIGHTNESS_MAX) / MATTER_BRIGHTNESS_MAX;
@@ -723,7 +772,7 @@ static void effect_candle(light_driver_t *driver)
 // Chase effect - moving dot
 static void effect_chase(light_driver_t *driver)
 {
-    if (driver->strip == NULL && driver->ws2805 == NULL) return;
+    if (driver->strip == NULL && driver->ws2805 == NULL && driver->analog == NULL) return;
 
     // Get current color
     uint16_t hue = (driver->hue * STANDARD_HUE_MAX) / MATTER_HUE_MAX;
@@ -1335,7 +1384,7 @@ esp_err_t app_driver_light_set_defaults(uint16_t endpoint_id)
 
         // Restore color temperature state on strips with a white source (the
         // attribute only exists there); other chipsets always run in HSV mode
-        if (driver->ws2805 != NULL || driver->is_rgbw) {
+        if (driver->has_cct || driver->is_rgbw) {
             driver->color_temp = clamp_mireds(driver, driver->color_temp);
             val = esp_matter_uint16(driver->color_temp);
             attribute::update(endpoint_id, ColorControl::Id,
@@ -1451,13 +1500,30 @@ app_driver_handle_t app_driver_light_init(void)
     }
 
     // Determine if RGBW mode based on chipset
-    s_light_driver.is_rgbw = (config->chipset == CHIPSET_SK6812);
+    s_light_driver.is_rgbw = tled_config_is_rgbw(config);
+    s_light_driver.has_cct = tled_config_is_cct(config);
 
     // Buffer size: use max of configured LEDs or 100 to clear leftover data
     // (applies to WS2805 too - the extra ICs are zeroed on every refresh)
     uint16_t strip_buffer_size = s_light_driver.num_leds > 100 ? s_light_driver.num_leds : 100;
 
-    if (config->chipset == CHIPSET_WS2805) {
+    if (config->chipset == CHIPSET_ANALOG_RGB) {
+        // Analog RGB light: three PWM pins, one colour for the whole light
+        s_light_driver.num_leds = 1;
+        analog_rgb_config_t analog_config = {
+            .gpio_r = config->pin_r,
+            .gpio_g = config->pin_g,
+            .gpio_b = config->pin_b,
+            .gpio_w1 = (config->pin_w == TLED_PIN_UNUSED) ? -1 : config->pin_w,
+            .gpio_w2 = (config->pin_w2 == TLED_PIN_UNUSED) ? -1 : config->pin_w2,
+        };
+        esp_err_t err = analog_rgb_new(&analog_config, &s_light_driver.analog);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create analog RGB output: %s", esp_err_to_name(err));
+            return NULL;
+        }
+        analog_rgb_clear(s_light_driver.analog);
+    } else if (config->chipset == CHIPSET_WS2805) {
         // WS2805 is 5 channels per IC - handled by the dedicated driver.
         ws2805_strip_config_t ws2805_config = {
             .gpio_num = s_light_driver.gpio_pin,

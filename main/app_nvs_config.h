@@ -26,6 +26,7 @@ typedef enum {
     CHIPSET_WS2811 = 1,
     CHIPSET_SK6812 = 2,
     CHIPSET_WS2805 = 3,     // 5-channel RGB + warm white + cool white
+    CHIPSET_ANALOG_RGB = 4, // Plain analog RGB light: 3 PWM pins + MOSFETs (no data line)
 } tled_chipset_t;
 
 // WS2805 white channel order: which wire channel (W1/W2) is warm vs cool.
@@ -37,6 +38,9 @@ typedef enum {
 
 // Sentinel for "BIN (backup data) pin not used"
 #define TLED_BIN_GPIO_DISABLED  0xFF
+
+// Sentinel for an optional analog pin that is not wired
+#define TLED_PIN_UNUSED         0xFF
 
 // Power-on behavior options
 typedef enum {
@@ -74,7 +78,29 @@ typedef struct {
     char device_name[32];       // Custom device name
     uint8_t config_version;     // Config version for migration
     bool configured;            // True if config has been set
+    uint8_t pin_r;              // Analog RGB: red channel PWM GPIO
+    uint8_t pin_g;              // Analog RGB: green channel PWM GPIO
+    uint8_t pin_b;              // Analog RGB: blue channel PWM GPIO
+    uint8_t pin_w;              // Analog: first white channel GPIO (TLED_PIN_UNUSED = none)
+    uint8_t pin_w2;             // Analog: second white channel GPIO (TLED_PIN_UNUSED = none)
 } tled_config_t;
+
+// Analog white channels: one pin = RGBW (like SK6812, uses white mode/CT),
+// two pins = RGB + warm + cool white (like WS2805, uses white_order/CT).
+static inline bool tled_config_is_analog(const tled_config_t *c)
+{
+    return c->chipset == CHIPSET_ANALOG_RGB;
+}
+static inline bool tled_config_is_rgbw(const tled_config_t *c)
+{
+    return c->chipset == CHIPSET_SK6812 ||
+           (c->chipset == CHIPSET_ANALOG_RGB && c->pin_w != TLED_PIN_UNUSED && c->pin_w2 == TLED_PIN_UNUSED);
+}
+static inline bool tled_config_is_cct(const tled_config_t *c)
+{
+    return c->chipset == CHIPSET_WS2805 ||
+           (c->chipset == CHIPSET_ANALOG_RGB && c->pin_w != TLED_PIN_UNUSED && c->pin_w2 != TLED_PIN_UNUSED);
+}
 
 // Default configuration values from Kconfig (menuconfig)
 #include <sdkconfig.h>
@@ -109,6 +135,8 @@ typedef struct {
 #define TLED_DEFAULT_CHIPSET        CHIPSET_SK6812
 #elif defined(CONFIG_TLED_LED_WS2805)
 #define TLED_DEFAULT_CHIPSET        CHIPSET_WS2805
+#elif defined(CONFIG_TLED_LED_ANALOG_RGB)
+#define TLED_DEFAULT_CHIPSET        CHIPSET_ANALOG_RGB
 #else
 #define TLED_DEFAULT_CHIPSET        CHIPSET_WS2812B
 #endif
@@ -120,6 +148,33 @@ typedef struct {
 #define TLED_DEFAULT_BIN_GPIO       TLED_BIN_GPIO_DISABLED
 #endif
 
+// Analog RGB PWM pins from Kconfig (only used with the analog RGB LED type)
+#if defined(CONFIG_TLED_ANALOG_PIN_R)
+#define TLED_DEFAULT_PIN_R          CONFIG_TLED_ANALOG_PIN_R
+#define TLED_DEFAULT_PIN_G          CONFIG_TLED_ANALOG_PIN_G
+#define TLED_DEFAULT_PIN_B          CONFIG_TLED_ANALOG_PIN_B
+#elif CONFIG_IDF_TARGET_ESP32H2
+#define TLED_DEFAULT_PIN_R          10
+#define TLED_DEFAULT_PIN_G          11
+#define TLED_DEFAULT_PIN_B          12
+#else
+#define TLED_DEFAULT_PIN_R          10
+#define TLED_DEFAULT_PIN_G          11
+#define TLED_DEFAULT_PIN_B          14
+#endif
+
+// Optional analog white channels: not wired by default
+#if defined(CONFIG_TLED_ANALOG_PIN_W) && (CONFIG_TLED_ANALOG_PIN_W >= 0)
+#define TLED_DEFAULT_PIN_W          CONFIG_TLED_ANALOG_PIN_W
+#else
+#define TLED_DEFAULT_PIN_W          TLED_PIN_UNUSED
+#endif
+#if defined(CONFIG_TLED_ANALOG_PIN_W2) && (CONFIG_TLED_ANALOG_PIN_W2 >= 0)
+#define TLED_DEFAULT_PIN_W2         CONFIG_TLED_ANALOG_PIN_W2
+#else
+#define TLED_DEFAULT_PIN_W2         TLED_PIN_UNUSED
+#endif
+
 #define TLED_DEFAULT_DEVICE_NAME    "TLED"
 #define TLED_DEFAULT_POWER_ON       POWER_ON_RESTORE
 #define TLED_DEFAULT_WHITE_MODE     WHITE_MODE_ACCURATE
@@ -127,7 +182,7 @@ typedef struct {
 #define TLED_DEFAULT_CHANNEL_GAIN   255
 #define TLED_DEFAULT_WHITE_ORDER    WHITE_ORDER_WW_CW
 #define TLED_DEFAULT_WHITE_LED_KELVIN 4000  // Neutral-white SK6812 default
-#define TLED_CONFIG_VERSION         5  // Bumped for white LED color temperature
+#define TLED_CONFIG_VERSION         6  // Bumped for analog RGB pins
 
 /**
  * @brief Initialize the config module

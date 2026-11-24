@@ -46,7 +46,55 @@ menu "TLED Configuration"
             bool "SK6812 (RGBW)"
         config TLED_LED_WS2805
             bool "WS2805 (RGB + warm/cool white)"
+        config TLED_LED_ANALOG_RGB
+            bool "Analog RGB (PWM, one GPIO per colour)"
     endchoice
+
+    config TLED_ANALOG_PIN_R
+        int "Analog RGB: red PWM GPIO"
+        depends on TLED_LED_ANALOG_RGB
+        default 10
+        range 0 24
+        help
+            GPIO driving the red channel's MOSFET gate (active high).
+
+    config TLED_ANALOG_PIN_G
+        int "Analog RGB: green PWM GPIO"
+        depends on TLED_LED_ANALOG_RGB
+        default 11
+        range 0 24
+        help
+            GPIO driving the green channel's MOSFET gate (active high).
+
+    config TLED_ANALOG_PIN_W
+        int "Analog: first white PWM GPIO (-1 = none)"
+        depends on TLED_LED_ANALOG_RGB
+        default -1
+        range -1 24
+        help
+            Optional white channel. With only this pin the light is treated as
+            RGBW (like SK6812). Set -1 for an RGB-only light.
+
+    config TLED_ANALOG_PIN_W2
+        int "Analog: second white PWM GPIO (-1 = none)"
+        depends on TLED_LED_ANALOG_RGB
+        default -1
+        range -1 24
+        help
+            Optional second white channel (needs the first). With both pins the
+            light is treated as RGB + warm white + cool white (like WS2805):
+            first = warm, second = cool unless 'set white_order cw_ww'.
+
+    config TLED_ANALOG_PIN_B
+        int "Analog RGB: blue PWM GPIO"
+        depends on TLED_LED_ANALOG_RGB
+        default 12 if IDF_TARGET_ESP32H2
+        default 14
+        range 0 24
+        help
+            GPIO driving the blue channel's MOSFET gate (active high).
+            Pick pins that are broken out on your board and not reserved
+            (ESP32-H2: avoid 8, 9, 25-27).
 
     config TLED_WS2805_BIN_GPIO
         int "WS2805 BIN (backup data) GPIO pin (-1 = disabled)"

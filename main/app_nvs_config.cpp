@@ -19,6 +19,7 @@ static const char *TAG = "tled_config";
 #define TLED_CONFIG_VERSION_POWER_ON 2
 #define TLED_CONFIG_VERSION_RGBW 3
 #define TLED_CONFIG_VERSION_WS2805 4
+#define TLED_CONFIG_VERSION_WHITE_KELVIN 5
 
 #if CONFIG_IDF_TARGET_ESP32H2
 // Valid GPIO pins for ESP32-H2 LED data output (the H2 has GPIO0-5, 8-14, 22-27)
@@ -55,6 +56,11 @@ static void set_defaults(tled_config_t *config)
     config->bin_gpio = TLED_DEFAULT_BIN_GPIO;
     config->white_order = TLED_DEFAULT_WHITE_ORDER;
     config->white_led_kelvin = TLED_DEFAULT_WHITE_LED_KELVIN;
+    config->pin_r = TLED_DEFAULT_PIN_R;
+    config->pin_g = TLED_DEFAULT_PIN_G;
+    config->pin_b = TLED_DEFAULT_PIN_B;
+    config->pin_w = TLED_DEFAULT_PIN_W;
+    config->pin_w2 = TLED_DEFAULT_PIN_W2;
     strncpy(config->device_name, TLED_DEFAULT_DEVICE_NAME, sizeof(config->device_name) - 1);
     config->device_name[sizeof(config->device_name) - 1] = '\0';
     config->config_version = TLED_CONFIG_VERSION;
@@ -172,6 +178,55 @@ static void migrate_v4_config(const tled_config_v4_t *old_config, tled_config_t 
     new_config->config_version = TLED_CONFIG_VERSION;
 }
 
+// v5 config layout (before analog RGB pins were added)
+typedef struct {
+    uint16_t num_leds;
+    uint8_t gpio_pin;
+    uint8_t rgb_order;
+    uint8_t chipset;
+    uint8_t max_brightness;
+    uint8_t power_on_behavior;
+    uint8_t white_mode;
+    uint8_t manual_white;
+    uint8_t gain_r;
+    uint8_t gain_g;
+    uint8_t gain_b;
+    uint8_t gain_w;
+    uint8_t bin_gpio;
+    uint8_t white_order;
+    uint16_t white_led_kelvin;
+    char device_name[32];
+    uint8_t config_version;
+    bool configured;
+} tled_config_v5_t;
+
+// Blob size is how the loader tells layouts apart, so they must all differ
+static_assert(sizeof(tled_config_v5_t) != sizeof(tled_config_t), "v5 and current config blobs must differ in size");
+
+static void migrate_v5_config(const tled_config_v5_t *old_config, tled_config_t *new_config)
+{
+    set_defaults(new_config);
+    new_config->num_leds = old_config->num_leds;
+    new_config->gpio_pin = old_config->gpio_pin;
+    new_config->rgb_order = old_config->rgb_order;
+    new_config->chipset = old_config->chipset;
+    new_config->max_brightness = old_config->max_brightness;
+    new_config->power_on_behavior = old_config->power_on_behavior;
+    new_config->white_mode = old_config->white_mode;
+    new_config->manual_white = old_config->manual_white;
+    new_config->gain_r = old_config->gain_r;
+    new_config->gain_g = old_config->gain_g;
+    new_config->gain_b = old_config->gain_b;
+    new_config->gain_w = old_config->gain_w;
+    new_config->bin_gpio = old_config->bin_gpio;
+    new_config->white_order = old_config->white_order;
+    new_config->white_led_kelvin = old_config->white_led_kelvin;
+    strncpy(new_config->device_name, old_config->device_name, sizeof(new_config->device_name) - 1);
+    new_config->device_name[sizeof(new_config->device_name) - 1] = '\0';
+    new_config->configured = old_config->configured;
+    new_config->config_version = TLED_CONFIG_VERSION;
+}
+
 // Validate configuration
 static bool validate_config(const tled_config_t *config)
 {
@@ -194,9 +249,35 @@ static bool validate_config(const tled_config_t *config)
     }
 
     // Check chipset
-    if (config->chipset > CHIPSET_WS2805) {
+    if (config->chipset > CHIPSET_ANALOG_RGB) {
         ESP_LOGW(TAG, "Invalid chipset: %d", config->chipset);
         return false;
+    }
+
+    // Analog: R/G/B plus optional W/W2, all valid and distinct; W2 needs W
+    if (config->chipset == CHIPSET_ANALOG_RGB) {
+        const uint8_t pins[5] = {config->pin_r, config->pin_g, config->pin_b,
+                                 config->pin_w, config->pin_w2};
+        bool ok = !(config->pin_w == TLED_PIN_UNUSED && config->pin_w2 != TLED_PIN_UNUSED);
+        for (int i = 0; i < 5 && ok; i++) {
+            if (pins[i] == TLED_PIN_UNUSED) {
+                ok = (i >= 3);              // only the white pins may be unused
+                continue;
+            }
+            if (!tled_config_validate_gpio(pins[i])) {
+                ok = false;
+            }
+            for (int j = i + 1; j < 5 && ok; j++) {
+                if (pins[j] != TLED_PIN_UNUSED && pins[i] == pins[j]) {
+                    ok = false;
+                }
+            }
+        }
+        if (!ok) {
+            ESP_LOGW(TAG, "Invalid analog pins: R=%d G=%d B=%d W=%d W2=%d",
+                     pins[0], pins[1], pins[2], pins[3], pins[4]);
+            return false;
+        }
     }
 
     // Check power-on behavior
@@ -282,6 +363,22 @@ esp_err_t tled_config_init(void)
                 ESP_LOGW(TAG, "Loaded config invalid, using defaults");
                 set_defaults(&s_config);
             }
+        } else if (err == ESP_OK && size == sizeof(tled_config_v5_t)) {
+            tled_config_v5_t old_config;
+            err = nvs_get_blob(handle, NVS_KEY_CONFIG, &old_config, &size);
+            if (err == ESP_OK && old_config.config_version == TLED_CONFIG_VERSION_WHITE_KELVIN) {
+                migrate_v5_config(&old_config, &s_config);
+                if (validate_config(&s_config)) {
+                    nvs_close(handle);
+                    ESP_LOGI(TAG, "Migrated v5 config: %d LEDs, GPIO%d, order=%d, chipset=%d, max_bri=%d, name=%s",
+                             s_config.num_leds, s_config.gpio_pin, s_config.rgb_order,
+                             s_config.chipset, s_config.max_brightness, s_config.device_name);
+                    s_initialized = true;
+                    return ESP_OK;
+                }
+            }
+            ESP_LOGW(TAG, "Failed to migrate v5 config blob, using defaults");
+            set_defaults(&s_config);
         } else if (err == ESP_OK && size == sizeof(tled_config_v4_t)) {
             tled_config_v4_t old_config;
             err = nvs_get_blob(handle, NVS_KEY_CONFIG, &old_config, &size);
@@ -390,7 +487,7 @@ esp_err_t tled_config_set(uint16_t num_leds, uint8_t gpio_pin, uint8_t rgb_order
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (chipset > CHIPSET_WS2805) {
+    if (chipset > CHIPSET_ANALOG_RGB) {
         ESP_LOGE(TAG, "Invalid chipset: %d", chipset);
         return ESP_ERR_INVALID_ARG;
     }

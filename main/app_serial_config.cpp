@@ -170,7 +170,9 @@ static void print_help(void) {
     serial_write("  set leds <n>      - Set number of LEDs (1-1000)\r\n");
     serial_write("  set gpio <n>      - Set data GPIO pin (" TLED_GPIO_RANGE_TEXT ")\r\n");
     serial_write("  set brightness <n> - Set max brightness (1-255)\r\n");
-    serial_write("  set type <t>      - Set LED type: ws2812b, ws2811, sk6812, ws2805\r\n");
+    serial_write("  set type <t>      - Set LED type: ws2812b, ws2811, sk6812, ws2805, analog\r\n");
+    serial_write("  set pin_r|pin_g|pin_b <n> - Analog PWM pins (type analog)\r\n");
+    serial_write("  set pin_w|pin_w2 <n|off>  - Optional analog white channel pins\r\n");
     serial_write("  set order <o>     - Set RGB order: grb, rgb, brg, rbg, bgr, gbr\r\n");
     serial_write("  set bin <n|off>   - WS2805 BIN backup data GPIO (off = disabled)\r\n");
     serial_write("  set white_order <o> - WS2805 white channels: ww_cw, cw_ww\r\n");
@@ -198,6 +200,7 @@ static void print_config(void) {
         case CHIPSET_WS2811: type_str = "ws2811"; break;
         case CHIPSET_SK6812: type_str = "sk6812"; break;
         case CHIPSET_WS2805: type_str = "ws2805"; break;
+        case CHIPSET_ANALOG_RGB: type_str = "analog"; break;
     }
 
     const char *order_str = "unknown";
@@ -219,7 +222,21 @@ static void print_config(void) {
 
     serial_write("\r\nCurrent configuration:\r\n");
     serial_printf("  leds       = %d\r\n", cfg->num_leds);
-    serial_printf("  gpio       = %d\r\n", cfg->gpio_pin);
+    if (cfg->chipset == CHIPSET_ANALOG_RGB) {
+        serial_printf("  pin_r/g/b  = %d / %d / %d\r\n", cfg->pin_r, cfg->pin_g, cfg->pin_b);
+        if (cfg->pin_w == TLED_PIN_UNUSED) {
+            serial_write("  pin_w      = off\r\n");
+        } else {
+            serial_printf("  pin_w      = %d\r\n", cfg->pin_w);
+        }
+        if (cfg->pin_w2 == TLED_PIN_UNUSED) {
+            serial_write("  pin_w2     = off\r\n");
+        } else {
+            serial_printf("  pin_w2     = %d\r\n", cfg->pin_w2);
+        }
+    } else {
+        serial_printf("  gpio       = %d\r\n", cfg->gpio_pin);
+    }
     serial_printf("  brightness = %d\r\n", cfg->max_brightness);
     serial_printf("  type       = %s\r\n", type_str);
     serial_printf("  order      = %s\r\n", order_str);
@@ -309,8 +326,49 @@ static void handle_set_command(const char *param, const char *value) {
             serial_write("Set type = ws2805 (RGB + warm/cool white)\r\n");
             serial_write("Note: switching to/from ws2805 changes the Matter clusters -\r\n");
             serial_write("      remove and re-add the device in your smart home app.\r\n");
+        } else if (strcmp(value, "analog") == 0) {
+            cfg->chipset = CHIPSET_ANALOG_RGB;
+            serial_printf("Set type = analog (PWM on pins R=%d G=%d B=%d)\r\n",
+                          cfg->pin_r, cfg->pin_g, cfg->pin_b);
+            serial_write("Set pins with 'set pin_r/pin_g/pin_b <n>' if these are wrong.\r\n");
         } else {
-            serial_write("Error: type must be ws2812b, ws2811, sk6812, or ws2805\r\n");
+            serial_write("Error: type must be ws2812b, ws2811, sk6812, ws2805, or analog\r\n");
+        }
+    }
+    else if (strcmp(param, "pin_r") == 0 || strcmp(param, "pin_g") == 0 || strcmp(param, "pin_b") == 0 ||
+             strcmp(param, "pin_w") == 0 || strcmp(param, "pin_w2") == 0) {
+        uint8_t *pins[5] = {&cfg->pin_r, &cfg->pin_g, &cfg->pin_b, &cfg->pin_w, &cfg->pin_w2};
+        int idx = (strcmp(param, "pin_r") == 0) ? 0 : (strcmp(param, "pin_g") == 0) ? 1 :
+                  (strcmp(param, "pin_b") == 0) ? 2 : (strcmp(param, "pin_w") == 0) ? 3 : 4;
+        uint8_t n;
+        if (idx >= 3 && strcmp(value, "off") == 0) {
+            if (idx == 3 && cfg->pin_w2 != TLED_PIN_UNUSED) {
+                serial_write("Error: turn off pin_w2 first\r\n");
+                return;
+            }
+            *pins[idx] = TLED_PIN_UNUSED;
+            serial_printf("Set %s = off\r\n", param);
+            return;
+        }
+        if (!parse_u8_value(value, &n) || !tled_config_validate_gpio(n)) {
+            serial_write("Error: invalid GPIO pin (avoid " TLED_GPIO_AVOID_TEXT ")\r\n");
+            return;
+        }
+        if (idx == 4 && cfg->pin_w == TLED_PIN_UNUSED) {
+            serial_write("Error: set pin_w before pin_w2\r\n");
+            return;
+        }
+        for (int i = 0; i < 5; i++) {
+            if (i != idx && *pins[i] == n) {
+                serial_printf("Error: GPIO %d is already used by another channel\r\n", n);
+                return;
+            }
+        }
+        *pins[idx] = n;
+        serial_printf("Set %s = %d\r\n", param, n);
+        if (idx == 4) {
+            serial_write("Two whites: pin_w = warm, pin_w2 = cool (see white_order). Re-add the device in your\r\n");
+            serial_write("smart home app if you add or remove white channels (the Matter clusters change).\r\n");
         }
     }
     else if (strcmp(param, "bin") == 0) {
